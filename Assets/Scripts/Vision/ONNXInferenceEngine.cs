@@ -1,12 +1,12 @@
 using System;
 using System.Collections.Generic;
 using UnityEngine;
-using Unity.Sentis;
+using Unity.InferenceEngine;
 
 namespace NomadGo.Vision
 {
     /// <summary>
-    /// Wraps Unity Sentis (2.x) inference for YOLOv8n ONNX model.
+    /// Wraps Unity Inference Engine (Sentis 2.2+) inference for YOLOv8n ONNX model.
     /// </summary>
     public class ONNXInferenceEngine : MonoBehaviour
     {
@@ -22,7 +22,7 @@ namespace NomadGo.Vision
         private bool     isLoaded            = false;
         private float    lastInferenceTimeMs = 0f;
 
-        // Sentis 2.x: Worker replaces IWorker / WorkerFactory
+        // Unity Inference Engine: Worker executes the imported model
         private Worker worker;
         private Model  runtimeModel;
 
@@ -75,7 +75,7 @@ namespace NomadGo.Vision
                     return;
                 }
 
-                // Sentis 2.x API
+                // Unity Inference Engine API
                 runtimeModel = ModelLoader.Load(modelAsset);
                 worker       = new Worker(runtimeModel, BackendType.CPU);
                 isLoaded     = true;
@@ -117,7 +117,7 @@ namespace NomadGo.Vision
 
                 using var input = new TensorFloat(new TensorShape(1, 3, inputHeight, inputWidth), data);
 
-                // Sentis 2.x: Schedule + ReadbackAndClone
+                // Schedule inference and read the output back on CPU
                 worker.Schedule(input);
                 using TensorFloat output = worker.PeekOutput() as TensorFloat;
                 if (output == null) { Debug.LogError("[ONNXEngine] Null output."); return detections; }
