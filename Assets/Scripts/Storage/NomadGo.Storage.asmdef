@@ -1,0 +1,18 @@
+{
+  "name": "NomadGo.Storage",
+  "rootNamespace": "NomadGo.Storage",
+  "references": [
+    "NomadGo.Core",
+    "NomadGo.Counting",
+    "NomadGo.Vision"
+  ],
+  "includePlatforms": [],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": false,
+  "precompiledReferences": [],
+  "autoReferenced": true,
+  "defineConstraints": [],
+  "versionDefines": [],
+  "noEngineReferences": false
+}

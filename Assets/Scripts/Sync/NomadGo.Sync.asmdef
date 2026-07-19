@@ -1,0 +1,18 @@
+{
+  "name": "NomadGo.Sync",
+  "rootNamespace": "NomadGo.Sync",
+  "references": [
+    "NomadGo.Storage",
+    "NomadGo.Counting",
+    "NomadGo.Core"
+  ],
+  "includePlatforms": [],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": false,
+  "precompiledReferences": [],
+  "autoReferenced": true,
+  "defineConstraints": [],
+  "versionDefines": [],
+  "noEngineReferences": false
+}

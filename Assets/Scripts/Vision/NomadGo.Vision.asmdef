@@ -1,0 +1,19 @@
+{
+  "name": "NomadGo.Vision",
+  "rootNamespace": "NomadGo.Vision",
+  "references": [
+    "Unity.Sentis",
+    "Unity.XR.ARFoundation",
+    "Unity.XR.ARSubsystems",
+    "NomadGo.Core"
+  ],
+  "includePlatforms": [],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": false,
+  "precompiledReferences": [],
+  "autoReferenced": true,
+  "defineConstraints": [],
+  "versionDefines": [],
+  "noEngineReferences": false
+}

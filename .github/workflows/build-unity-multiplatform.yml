@@ -1,0 +1,150 @@
+# بناء Unity لمنصات متعددة (Windows, macOS, Linux, WebGL)
+# Build Unity for Multiple Platforms (Windows, macOS, Linux, WebGL)
+
+name: Build Unity Multi-Platform
+
+on:
+  workflow_dispatch:
+    inputs:
+      platform:
+        description: 'اختر المنصة للبناء / Select platform to build'
+        required: true
+        type: choice
+        options:
+          - StandaloneWindows64
+          - StandaloneOSX
+          - StandaloneLinux64
+          - WebGL
+          - All
+        default: 'All'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build for ${{ matrix.targetPlatform }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        targetPlatform:
+          - ${{ github.event.inputs.platform == 'All' && 'StandaloneWindows64' || github.event.inputs.platform }}
+          - ${{ github.event.inputs.platform == 'All' && 'StandaloneLinux64' || '' }}
+          - ${{ github.event.inputs.platform == 'All' && 'WebGL' || '' }}
+        exclude:
+          - targetPlatform: ''
+    steps:
+      # استنساخ المستودع
+      # Checkout repository
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          lfs: true
+
+      # Preflight: fail fast if required secrets are missing
+      - name: Preflight (check secrets present)
+        shell: bash
+        env:
+          UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
+          UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
+          UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+        run: |
+          if [ -z "$UNITY_LICENSE" ]; then echo "❌ UNITY_LICENSE is empty"; exit 1; fi
+          if [ -z "$UNITY_EMAIL" ] || [ -z "$UNITY_PASSWORD" ]; then echo "❌ UNITY_EMAIL or UNITY_PASSWORD is empty"; exit 1; fi
+          echo "✅ Unity licensing secrets are present"
+
+      # Download ONNX model if YOLOV8N_ONNX_URL secret is set
+      - name: Download ONNX model
+        shell: bash
+        env:
+          YOLOV8N_ONNX_URL: ${{ secrets.YOLOV8N_ONNX_URL }}
+        run: |
+          MODEL_DIR="Assets/Resources/Models"
+          MODEL_PATH="${MODEL_DIR}/yolov8n.onnx"
+          if [ -f "$MODEL_PATH" ]; then
+            echo "✅ yolov8n.onnx already present (committed via Git LFS or prior step)."
+          elif [ -n "$YOLOV8N_ONNX_URL" ]; then
+            echo "⬇️  Downloading yolov8n.onnx from YOLOV8N_ONNX_URL..."
+            mkdir -p "$MODEL_DIR"
+            curl -fsSL "$YOLOV8N_ONNX_URL" -o "$MODEL_PATH"
+            echo "✅ yolov8n.onnx downloaded successfully."
+          else
+            echo "⚠️  yolov8n.onnx is missing and YOLOV8N_ONNX_URL secret is not set."
+            echo "   The Unity build will proceed but inference features will be disabled at runtime."
+            echo "   To enable inference:"
+            echo "     1. Export the model: python -m ultralytics export model=yolov8n.pt format=onnx imgsz=640"
+            echo "     2. Import the .onnx into Unity and place it under Assets/Resources/Models/"
+            echo "     3. (Optional) Add a YOLOV8N_ONNX_URL secret pointing to a downloadable copy."
+            echo "   See Docs/CI_CD_SETUP.md for full instructions."
+          fi
+
+      # تخزين مؤقت لمكتبة Unity
+      # Cache Unity Library
+      - name: Cache Unity Library
+        uses: actions/cache@v4
+        with:
+          path: Library
+          key: Library-${{ matrix.targetPlatform }}-${{ hashFiles('Assets/**', 'Packages/**', 'ProjectSettings/**') }}
+          restore-keys: |
+            Library-${{ matrix.targetPlatform }}-
+            Library-
+
+      # تحرير مساحة القرص
+      # Free disk space
+      - name: Free Disk Space
+        uses: jlumbroso/free-disk-space@54081f138730dfa15788a46383842cd2f914a1be
+        continue-on-error: true
+
+      # بناء المشروع
+      # Build project
+      - name: Build Unity Project
+        uses: game-ci/unity-builder@v4
+        env:
+          UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
+          UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
+          UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+        with:
+          unityVersion: 6000.3.10f1
+          targetPlatform: ${{ matrix.targetPlatform }}
+          buildName: LHD
+          versioning: Semantic
+
+      - name: Upload Unity Editor.log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unity-editor-log
+          path: |
+            **/Editor.log
+            /github/home/.config/unity3d/Editor.log
+            /github/home/.local/share/unity3d/Editor.log
+            /root/.config/unity3d/Editor.log
+            /root/.local/share/unity3d/Editor.log
+
+      # رفع البناء كـ artifact
+      # Upload build as artifact
+      - name: Upload Build
+        uses: actions/upload-artifact@v4
+        with:
+          name: LHD-${{ matrix.targetPlatform }}
+          path: build/${{ matrix.targetPlatform }}
+          retention-days: 14
+
+      # عرض ملخص البناء
+      # Display build summary
+      - name: Build Summary
+        if: always()
+        run: |
+          echo "🎮 Unity Build Complete!"
+          echo "🖥️ Platform: ${{ matrix.targetPlatform }}"
+          echo "🔢 Unity Version: 2022.3.22f1"
+          if [ -d "build/${{ matrix.targetPlatform }}" ]; then
+            echo "✅ Build successful"
+            echo "📦 Build size:"
+            du -sh build/${{ matrix.targetPlatform }}
+          else
+            echo "❌ Build failed - artifacts not found"
+          fi

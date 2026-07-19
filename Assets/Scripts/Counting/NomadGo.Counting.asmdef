@@ -1,0 +1,17 @@
+{
+  "name": "NomadGo.Counting",
+  "rootNamespace": "NomadGo.Counting",
+  "references": [
+    "NomadGo.Vision",
+    "NomadGo.Core"
+  ],
+  "includePlatforms": [],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": false,
+  "precompiledReferences": [],
+  "autoReferenced": true,
+  "defineConstraints": [],
+  "versionDefines": [],
+  "noEngineReferences": false
+}

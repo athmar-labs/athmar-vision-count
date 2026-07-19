@@ -1,0 +1,49 @@
+{
+  "app": {
+    "name": "NomadGo-SpatialVision",
+    "version": "1.0.0",
+    "build": 1
+  },
+  "model": {
+    "path": "Models/yolov8n.onnx",
+    "labels_path": "Models/labels.txt",
+    "input_width": 640,
+    "input_height": 640,
+    "confidence_threshold": 0.45,
+    "nms_threshold": 0.5,
+    "max_detections": 100
+  },
+  "counting": {
+    "row_cluster_vertical_gap": 50,
+    "row_limit": 6,
+    "iou_threshold": 0.4,
+    "tracking_max_age_frames": 15,
+    "min_detection_confidence": 0.45
+  },
+  "spatial": {
+    "enable_depth_refinement": false,
+    "plane_detection_mode": "Horizontal",
+    "max_plane_count": 10
+  },
+  "sync": {
+    "enabled": false,
+    "base_url": "",
+    "pulse_interval_seconds": 5,
+    "retry_max_attempts": 5,
+    "retry_base_delay_seconds": 2,
+    "retry_max_delay_seconds": 60,
+    "queue_persistent": true
+  },
+  "storage": {
+    "provider": "json",
+    "autosave_interval_seconds": 2,
+    "session_export_path": "Sessions/"
+  },
+  "diagnostics": {
+    "show_fps_overlay": true,
+    "log_inference_time": true,
+    "show_memory_monitor": true,
+    "log_tracking_events": false,
+    "verbose_mode": false
+  }
+}
