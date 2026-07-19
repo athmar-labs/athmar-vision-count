@@ -176,8 +176,6 @@ GameObject:
   serializedVersion: 6
   m_Component:
   - component: {fileID: 200001}
-  - component: {fileID: 200002}
-  - component: {fileID: 200003}
   m_Layer: 0
   m_Name: AR Session
   m_TagString: Untagged
@@ -209,8 +207,6 @@ GameObject:
   serializedVersion: 6
   m_Component:
   - component: {fileID: 300001}
-  - component: {fileID: 300002}
-  - component: {fileID: 300003}
   m_Layer: 0
   m_Name: AR Session Origin
   m_TagString: Untagged
