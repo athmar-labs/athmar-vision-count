@@ -30,6 +30,29 @@ jobs:
     timeout-minutes: 60
 
     steps:
+      # Unity's Android editor image is large. Remove unused runner tooling before
+      # Docker pulls it so the hosted runner does not exhaust its disk.
+      - name: Free disk space for Unity
+        uses: jlumbroso/free-disk-space@54081f138730dfa15788a46383842cd2f914a1be
+        with:
+          android: false
+          dotnet: true
+          haskell: true
+          large-packages: true
+          docker-images: true
+          swap-storage: true
+          tool-cache: true
+
+      - name: Verify available disk space
+        shell: bash
+        run: |
+          df -h /
+          AVAILABLE_KB=$(df --output=avail / | tail -1)
+          if [ "$AVAILABLE_KB" -lt 20971520 ]; then
+            echo "At least 20 GB of free disk is required for the Unity Android image."
+            exit 1
+          fi
+
       # Checkout repository with Git LFS
       - name: Checkout repository
         uses: actions/checkout@v4
