@@ -2,7 +2,7 @@
   "name": "NomadGo.Vision",
   "rootNamespace": "NomadGo.Vision",
   "references": [
-    "Unity.Sentis",
+    "Unity.InferenceEngine",
     "Unity.XR.ARFoundation",
     "Unity.XR.ARSubsystems",
     "NomadGo.Core"
