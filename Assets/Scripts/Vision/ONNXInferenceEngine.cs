@@ -115,11 +115,11 @@ namespace NomadGo.Vision
                         data[2 * stride + idx] = pixels[idx].b;
                     }
 
-                using var input = new TensorFloat(new TensorShape(1, 3, inputHeight, inputWidth), data);
+                using var input = new Tensor<float>(new TensorShape(1, 3, inputHeight, inputWidth), data);
 
                 // Schedule inference and read the output back on CPU
                 worker.Schedule(input);
-                using TensorFloat output = worker.PeekOutput() as TensorFloat;
+                using Tensor<float> output = worker.PeekOutput() as Tensor<float>;
                 if (output == null) { Debug.LogError("[ONNXEngine] Null output."); return detections; }
 
                 // Make readable on CPU
