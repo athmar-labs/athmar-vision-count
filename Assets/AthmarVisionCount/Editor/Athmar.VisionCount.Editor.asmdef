@@ -2,7 +2,8 @@
   "name": "Athmar.VisionCount.Editor",
   "rootNamespace": "AthmarLabs.VisionCount.Editor",
   "references": [
-    "Athmar.VisionCount.Runtime"
+    "Athmar.VisionCount.Runtime",
+    "Unity.InferenceEngine"
   ],
   "includePlatforms": [
     "Editor"

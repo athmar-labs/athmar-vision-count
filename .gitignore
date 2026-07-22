@@ -8,6 +8,7 @@
 /[Uu]ser[Ss]ettings/
 /[Mm]emoryCaptures/
 /[Rr]ecordings/
+/Assets/Generated/
 
 # IDE and tooling
 .vs/
@@ -45,11 +46,14 @@ sysinfo.txt
 .env
 .env.*
 !.env.example
+/.ci/
 
 # ML models and customer datasets are distributed separately
 *.onnx
 *.sentis
 *.tflite
+/Assets/PrivateModels/
+/Assets/PrivateConfig/
 /Datasets/
 /CustomerData/
 

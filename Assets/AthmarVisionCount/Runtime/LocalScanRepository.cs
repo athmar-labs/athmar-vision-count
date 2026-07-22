@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Text;
 using UnityEngine;
@@ -61,6 +62,45 @@ namespace AthmarLabs.VisionCount
 
             sessions.Sort((left, right) => string.CompareOrdinal(right.CompletedAtUtc, left.CompletedAtUtc));
             return sessions;
+        }
+
+        public int DeleteExpired(int retentionDays, DateTime? utcNow = null)
+        {
+            if (retentionDays < 1)
+                throw new ArgumentOutOfRangeException(nameof(retentionDays));
+            if (!Directory.Exists(_rootDirectory))
+                return 0;
+
+            var cutoff = (utcNow ?? DateTime.UtcNow).ToUniversalTime().AddDays(-retentionDays);
+            var deleted = 0;
+            foreach (var path in Directory.GetFiles(_rootDirectory, "*.json", SearchOption.TopDirectoryOnly))
+            {
+                try
+                {
+                    var timestamp = File.GetLastWriteTimeUtc(path);
+                    var json = File.ReadAllText(path, Encoding.UTF8);
+                    var session = JsonUtility.FromJson<ScanSessionRecord>(json);
+                    if (session != null && DateTime.TryParse(
+                            session.CompletedAtUtc,
+                            CultureInfo.InvariantCulture,
+                            DateTimeStyles.RoundtripKind,
+                            out var completedAt))
+                    {
+                        timestamp = completedAt.ToUniversalTime();
+                    }
+
+                    if (timestamp > cutoff)
+                        continue;
+                    File.Delete(path);
+                    deleted++;
+                }
+                catch (Exception exception)
+                {
+                    Debug.LogWarning($"Unable to evaluate scan retention for '{path}': {exception.Message}");
+                }
+            }
+
+            return deleted;
         }
 
         public void DeleteAllLocalData()
