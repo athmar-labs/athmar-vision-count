@@ -1,7 +1,10 @@
 {
   "name": "Athmar.VisionCount.Runtime",
   "rootNamespace": "AthmarLabs.VisionCount",
-  "references": [],
+  "references": [
+    "Unity.InferenceEngine",
+    "UnityEngine.UI"
+  ],
   "includePlatforms": [],
   "excludePlatforms": [],
   "allowUnsafeCode": false,
