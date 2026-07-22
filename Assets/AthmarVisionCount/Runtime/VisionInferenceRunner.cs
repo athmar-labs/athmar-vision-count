@@ -48,12 +48,16 @@ namespace AthmarLabs.VisionCount
 
         public void Pause()
         {
+            if (!_running)
+                return;
             _paused = true;
             StatusChanged?.Invoke("paused");
         }
 
         public void Resume()
         {
+            if (!IsReady)
+                return;
             _paused = false;
             _nextInferenceAt = 0d;
             StatusChanged?.Invoke("scanning");
@@ -62,6 +66,7 @@ namespace AthmarLabs.VisionCount
         public void StopPipeline()
         {
             _running = false;
+            _paused = true;
             if (_loopStarted)
             {
                 _inferenceLoop.Cancel();
@@ -183,7 +188,12 @@ namespace AthmarLabs.VisionCount
             }
             catch (Exception exception)
             {
+                _running = false;
                 ReportFault("On-device inference stopped: " + exception.Message);
+            }
+            finally
+            {
+                _loopStarted = false;
             }
         }
 
