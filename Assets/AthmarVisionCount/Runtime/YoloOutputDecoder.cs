@@ -23,7 +23,7 @@ namespace AthmarLabs.VisionCount
                 throw new ArgumentNullException(nameof(data));
             if (catalogue == null)
                 throw new ArgumentNullException(nameof(catalogue));
-            if (dimensionA <= 0 || dimensionB <= 0 || data.Length != dimensionA * dimensionB)
+            if (dimensionA <= 0 || dimensionB <= 0 || data.LongLength != (long)dimensionA * dimensionB)
                 throw new ArgumentException("The output tensor dimensions do not match its data length.", nameof(data));
             if (inputWidth <= 0 || inputHeight <= 0)
                 throw new ArgumentOutOfRangeException(nameof(inputWidth));
@@ -45,6 +45,7 @@ namespace AthmarLabs.VisionCount
             for (var candidateIndex = 0; candidateIndex < candidateCount; candidateIndex++)
             {
                 var objectness = hasObjectness ? Read(data, layout, featureCount, candidateCount, candidateIndex, 4) : 1f;
+                ValidateProbability(objectness, "objectness", candidateIndex);
                 if (objectness <= 0f)
                     continue;
 
@@ -53,6 +54,7 @@ namespace AthmarLabs.VisionCount
                 for (var classIndex = 0; classIndex < classCount; classIndex++)
                 {
                     var score = Read(data, layout, featureCount, candidateCount, candidateIndex, classOffset + classIndex);
+                    ValidateProbability(score, "class score", candidateIndex);
                     if (score <= bestClassScore)
                         continue;
                     bestClassScore = score;
@@ -65,10 +67,10 @@ namespace AthmarLabs.VisionCount
                 if (!catalogue.TryGetByLabelIndex(bestClass, out var product) || product == null || !product.Active)
                     continue;
 
-                var centerX = Read(data, layout, featureCount, candidateCount, candidateIndex, 0);
-                var centerY = Read(data, layout, featureCount, candidateCount, candidateIndex, 1);
-                var width = Read(data, layout, featureCount, candidateCount, candidateIndex, 2);
-                var height = Read(data, layout, featureCount, candidateCount, candidateIndex, 3);
+                var centerX = ReadFinite(data, layout, featureCount, candidateCount, candidateIndex, 0, "center X");
+                var centerY = ReadFinite(data, layout, featureCount, candidateCount, candidateIndex, 1, "center Y");
+                var width = ReadFinite(data, layout, featureCount, candidateCount, candidateIndex, 2, "width");
+                var height = ReadFinite(data, layout, featureCount, candidateCount, candidateIndex, 3, "height");
 
                 if (!coordinatesNormalized)
                 {
@@ -78,6 +80,8 @@ namespace AthmarLabs.VisionCount
                     height /= inputHeight;
                 }
 
+                if (width <= 0f || height <= 0f)
+                    continue;
                 width = Clamp01(width);
                 height = Clamp01(height);
                 var left = Clamp01(centerX - (width * 0.5f));
@@ -87,7 +91,7 @@ namespace AthmarLabs.VisionCount
                 if (width <= 0f || height <= 0f)
                     continue;
 
-                candidates.Add(new Detection(product.Sku, Clamp01(confidence), new NormalizedRect(left, top, width, height)));
+                candidates.Add(new Detection(product.Sku, confidence, new NormalizedRect(left, top, width, height)));
             }
 
             candidates.Sort((left, right) => right.Confidence.CompareTo(left.Confidence));
@@ -114,6 +118,27 @@ namespace AthmarLabs.VisionCount
             }
 
             return selected;
+        }
+
+        private static float ReadFinite(
+            IReadOnlyList<float> data,
+            DetectionTensorLayout layout,
+            int featureCount,
+            int candidateCount,
+            int candidateIndex,
+            int featureIndex,
+            string name)
+        {
+            var value = Read(data, layout, featureCount, candidateCount, candidateIndex, featureIndex);
+            if (float.IsNaN(value) || float.IsInfinity(value))
+                throw new InvalidOperationException($"Model output contains invalid {name} at candidate {candidateIndex}.");
+            return value;
+        }
+
+        private static void ValidateProbability(float value, string name, int candidateIndex)
+        {
+            if (float.IsNaN(value) || float.IsInfinity(value) || value < 0f || value > 1f)
+                throw new InvalidOperationException($"Model output {name} at candidate {candidateIndex} must be a probability from 0 to 1.");
         }
 
         private static float Read(
