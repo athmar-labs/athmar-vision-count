@@ -1,0 +1,174 @@
+# بناء التطبيق عن طريق RunPod (Node.js + React)
+# Build Application via RunPod (Node.js + React)
+
+name: Build via RunPod
+
+on:
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  # بدء الـ runner على RunPod
+  # Start self-hosted runner on RunPod
+  start-runner:
+    name: Start RunPod Runner
+    runs-on: ubuntu-latest
+    outputs:
+      pod_id: ${{ steps.start-pod.outputs.pod_id }}
+      runner_label: ${{ steps.start-pod.outputs.runner_label }}
+    steps:
+      # بدء pod على RunPod وتسجيله كـ GitHub Actions runner
+      # Start a RunPod pod and register it as a GitHub Actions runner
+      - name: Start RunPod pod as GitHub Actions runner
+        id: start-pod
+        env:
+          RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
+          GH_PAT: ${{ secrets.GH_PAT }}
+        run: |
+          RUNNER_LABEL="runpod-${{ github.run_id }}"
+
+          # إطلاق pod على RunPod مع صورة GitHub Actions runner
+          # Launch a RunPod pod with the GitHub Actions runner image
+          RESPONSE=$(curl -s \
+            -H "Content-Type: application/json" \
+            -H "Authorization: Bearer $RUNPOD_API_KEY" \
+            "https://api.runpod.io/graphql" \
+            --data-raw "{
+              \"query\": \"mutation { podFindAndDeployOnDemand(input: { cloudType: SECURE, gpuCount: 0, volumeInGb: 0, containerDiskInGb: 20, minMemoryInGb: 8, minVcpuCount: 4, imageName: \\\"myoung34/github-runner:latest\\\", env: [{ key: \\\"ACCESS_TOKEN\\\", value: \\\"$GH_PAT\\\" }, { key: \\\"REPO_URL\\\", value: \\\"https://github.com/${{ github.repository }}\\\" }, { key: \\\"RUNNER_NAME\\\", value: \\\"$RUNNER_LABEL\\\" }, { key: \\\"RUNNER_LABELS\\\", value: \\\"$RUNNER_LABEL\\\" }, { key: \\\"RUNNER_SCOPE\\\", value: \\\"repo\\\" }, { key: \\\"EPHEMERAL\\\", value: \\\"1\\\" }] }) { id } }\"
+            }")
+
+          # التحقق من نجاح إنشاء الـ pod
+          # Validate pod creation response
+          if echo "$RESPONSE" | jq -e '.errors' > /dev/null 2>&1; then
+            echo "❌ RunPod API error:"
+            echo "$RESPONSE" | jq '.errors'
+            exit 1
+          fi
+
+          POD_ID=$(echo "$RESPONSE" | jq -r '.data.podFindAndDeployOnDemand.id // empty')
+          if [ -z "$POD_ID" ]; then
+            echo "❌ Failed to start RunPod pod. API response:"
+            echo "$RESPONSE"
+            exit 1
+          fi
+
+          echo "pod_id=$POD_ID" >> $GITHUB_OUTPUT
+          echo "runner_label=$RUNNER_LABEL" >> $GITHUB_OUTPUT
+          echo "✅ Started RunPod pod: $POD_ID"
+          echo "🏷️ Runner label: $RUNNER_LABEL"
+
+      # انتظار حتى يصبح الـ runner متاحاً عبر فحص دوري
+      # Poll until the runner comes online (up to 10 minutes)
+      - name: Wait for runner to come online
+        env:
+          GH_PAT: ${{ secrets.GH_PAT }}
+          RUNNER_LABEL: ${{ steps.start-pod.outputs.runner_label }}
+        run: |
+          echo "⏳ Waiting for RunPod runner ($RUNNER_LABEL) to come online..."
+          TIMEOUT=600
+          ELAPSED=0
+          INTERVAL=15
+          while [ $ELAPSED -lt $TIMEOUT ]; do
+            STATUS=$(curl -s \
+              -H "Authorization: token $GH_PAT" \
+              -H "Accept: application/vnd.github.v3+json" \
+              "https://api.github.com/repos/${{ github.repository }}/actions/runners" \
+              | jq -r --arg label "$RUNNER_LABEL" \
+                '.runners[] | select(.labels[].name == $label) | .status' 2>/dev/null || true)
+            if [ "$STATUS" = "online" ]; then
+              echo "✅ Runner is online!"
+              exit 0
+            fi
+            echo "⏳ Runner not yet online (${ELAPSED}s elapsed), retrying in ${INTERVAL}s..."
+            sleep $INTERVAL
+            ELAPSED=$((ELAPSED + INTERVAL))
+          done
+          echo "❌ Timed out waiting for runner to come online after ${TIMEOUT}s"
+          exit 1
+
+  # بناء المشروع على RunPod
+  # Build the project on RunPod
+  build:
+    name: Build Application on RunPod
+    needs: start-runner
+    runs-on: ${{ needs.start-runner.outputs.runner_label }}
+    timeout-minutes: 30
+    steps:
+      # استنساخ المستودع
+      # Checkout repository
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # إعداد Node.js
+      # Setup Node.js
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20.x'
+          cache: 'npm'
+
+      # تثبيت الاعتماديات
+      # Install dependencies
+      - name: Install dependencies
+        run: npm ci
+
+      # بناء المشروع (Frontend + Backend)
+      # Build the project (Frontend + Backend)
+      - name: Build project
+        run: npm run build
+        env:
+          NODE_ENV: production
+
+      # رفع نتائج البناء
+      # Upload build artifacts
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: runpod-build-output
+          path: dist
+          retention-days: 7
+
+      # عرض ملخص البناء
+      # Display build summary
+      - name: Build Summary
+        if: always()
+        run: |
+          echo "🚀 RunPod Build Complete!"
+          if [ -d "dist" ]; then
+            echo "✅ Build successful"
+            echo "📦 Build output:"
+            ls -lh dist/
+          else
+            echo "❌ Build failed - dist directory not found"
+          fi
+
+  # إيقاف الـ runner وإنهاء الـ pod
+  # Stop runner and terminate the pod
+  stop-runner:
+    name: Stop RunPod Runner
+    needs:
+      - start-runner
+      - build
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      # إنهاء الـ pod على RunPod بعد اكتمال البناء
+      # Terminate the RunPod pod after build completes
+      - name: Terminate RunPod pod
+        env:
+          RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
+          POD_ID: ${{ needs.start-runner.outputs.pod_id }}
+        run: |
+          TERMINATE_RESPONSE=$(curl -s \
+            -H "Content-Type: application/json" \
+            -H "Authorization: Bearer $RUNPOD_API_KEY" \
+            "https://api.runpod.io/graphql" \
+            --data-raw "{\"query\": \"mutation { podTerminate(input: { podId: \\\"$POD_ID\\\" }) }\"}")
+          if echo "$TERMINATE_RESPONSE" | jq -e '.errors' > /dev/null 2>&1; then
+            echo "⚠️ Warning: pod termination returned errors:"
+            echo "$TERMINATE_RESPONSE" | jq '.errors'
+          else
+            echo "🛑 Terminated RunPod pod: $POD_ID"
+          fi

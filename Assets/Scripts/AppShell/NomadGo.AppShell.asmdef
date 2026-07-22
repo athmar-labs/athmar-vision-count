@@ -1,0 +1,26 @@
+{
+  "name": "NomadGo.AppShell",
+  "rootNamespace": "NomadGo.AppShell",
+  "references": [
+    "NomadGo.Core",
+    "NomadGo.Vision",
+    "NomadGo.Spatial",
+    "NomadGo.Counting",
+    "NomadGo.AROverlay",
+    "NomadGo.Storage",
+    "NomadGo.Sync",
+    "NomadGo.Diagnostics",
+    "Unity.XR.ARFoundation",
+    "Unity.XR.ARSubsystems",
+    "Unity.TextMeshPro"
+  ],
+  "includePlatforms": [],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": false,
+  "precompiledReferences": [],
+  "autoReferenced": true,
+  "defineConstraints": [],
+  "versionDefines": [],
+  "noEngineReferences": false
+}

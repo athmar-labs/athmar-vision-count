@@ -1,0 +1,206 @@
+# بناء تطبيق Android APK
+# Build Android APK
+
+name: Build Android APK
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'Assets/**'
+      - 'Packages/**'
+      - 'ProjectSettings/**'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'Assets/**'
+      - 'Packages/**'
+      - 'ProjectSettings/**'
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  buildForAndroid:
+    name: Build for Android
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      # Unity's Android editor image is large. Remove unused runner tooling before
+      # Docker pulls it so the hosted runner does not exhaust its disk.
+      - name: Free disk space for Unity
+        uses: jlumbroso/free-disk-space@54081f138730dfa15788a46383842cd2f914a1be
+        with:
+          android: false
+          dotnet: true
+          haskell: true
+          large-packages: true
+          docker-images: true
+          swap-storage: true
+          tool-cache: true
+
+      - name: Verify available disk space
+        shell: bash
+        run: |
+          df -h /
+          AVAILABLE_KB=$(df --output=avail / | tail -1)
+          if [ "$AVAILABLE_KB" -lt 20971520 ]; then
+            echo "At least 20 GB of free disk is required for the Unity Android image."
+            exit 1
+          fi
+
+      # Checkout repository with Git LFS
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          lfs: true
+
+      - name: Validate scenes in Build Settings
+        shell: bash
+        run: |
+          SETTINGS="ProjectSettings/EditorBuildSettings.asset"
+          if grep -Eiq 'untitled|path: *$|m_Scenes: *\[\]' "$SETTINGS"; then
+            echo "❌ Invalid or empty scene entry found in $SETTINGS"
+            exit 1
+          fi
+          while IFS= read -r scene; do
+            if [ ! -f "$scene" ]; then
+              echo "❌ Build Settings scene does not exist: $scene"
+              exit 1
+            fi
+          done < <(sed -n 's/^[[:space:]]*path:[[:space:]]*//p' "$SETTINGS")
+          echo "✅ Build Settings scenes look valid"
+
+      # Cache Unity Library for faster builds
+      - name: Cache Unity Library
+        uses: actions/cache@v4
+        with:
+          path: Library
+          key: Library-Android-${{ hashFiles('Assets/**', 'Packages/**', 'ProjectSettings/**') }}
+          restore-keys: |
+            Library-Android-
+            Library-
+
+      # Preflight: fail fast if required secrets are missing
+      - name: Preflight (check secrets present)
+        shell: bash
+        env:
+          UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
+          UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
+          UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+        run: |
+          if [ -z "$UNITY_LICENSE" ]; then echo "❌ UNITY_LICENSE is empty"; exit 1; fi
+          if [ -z "$UNITY_EMAIL" ] || [ -z "$UNITY_PASSWORD" ]; then echo "❌ UNITY_EMAIL or UNITY_PASSWORD is empty"; exit 1; fi
+          echo "✅ Unity licensing secrets are present"
+
+      # Download ONNX model if YOLOV8N_ONNX_URL secret is set
+      - name: Download ONNX model
+        shell: bash
+        env:
+          YOLOV8N_ONNX_URL: ${{ secrets.YOLOV8N_ONNX_URL }}
+        run: |
+          MODEL_DIR="Assets/Resources/Models"
+          MODEL_PATH="${MODEL_DIR}/yolov8n.onnx"
+          META_PATH="${MODEL_PATH}.meta"
+          if [ -f "$MODEL_PATH" ]; then
+            echo "✅ yolov8n.onnx already present (committed via Git LFS or prior step)."
+          elif [ -n "$YOLOV8N_ONNX_URL" ]; then
+            echo "⬇️  Downloading yolov8n.onnx from YOLOV8N_ONNX_URL..."
+            mkdir -p "$MODEL_DIR"
+            curl -fsSL "$YOLOV8N_ONNX_URL" -o "$MODEL_PATH"
+            echo "✅ yolov8n.onnx downloaded successfully."
+          else
+            echo "⚠️  yolov8n.onnx is missing and YOLOV8N_ONNX_URL secret is not set."
+            echo "   The Unity build will proceed but inference features will be disabled at runtime."
+            # Remove orphaned .meta file to prevent Unity build failure
+            if [ -f "$META_PATH" ]; then
+              echo "🗑️  Removing orphaned ${META_PATH} to allow build to proceed."
+              rm -f "$META_PATH"
+            fi
+            echo "   To enable inference:"
+            echo "     1. Export the model: python -m ultralytics export model=yolov8n.pt format=onnx imgsz=640"
+            echo "     2. Import the .onnx into Unity and place it under Assets/Resources/Models/"
+            echo "     3. (Optional) Add a YOLOV8N_ONNX_URL secret pointing to a downloadable copy."
+            echo "   See Docs/CI_CD_SETUP.md for full instructions."
+          fi
+
+      # Build Android APK
+      - name: Build Android APK
+        uses: game-ci/unity-builder@v4
+        env:
+          UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
+          UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
+          UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+        with:
+          unityVersion: 6000.3.10f1
+          targetPlatform: Android
+          androidExportType: androidPackage
+          androidTargetSdkVersion: AndroidApiLevel34
+          buildName: LHD
+          versioning: Semantic
+          allowDirtyBuild: true
+          customParameters: -logFile - -stackTraceLogType Full -nographics
+
+      # Find Editor.log location inside workspace
+      - name: Find Editor.log
+        if: always()
+        shell: bash
+        run: |
+          echo "Searching for Editor.log..."
+          find . -type f -name "Editor.log" -print || true
+
+      # Upload Unity logs (Editor.log) as artifact
+      - name: Upload Unity Editor.log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unity-editor-log
+          if-no-files-found: warn
+          path: |
+            Library/Logs/Editor.log
+            Library/Editor.log
+            **/Editor.log
+
+      # Verify APK/AAB output
+      - name: Verify APK/AAB output
+        if: always()
+        shell: bash
+        run: |
+          echo "== build directory =="
+          ls -lah build || true
+          echo "== build/Android =="
+          ls -lah build/Android || true
+          echo "== search for apk/aab =="
+          find build -maxdepth 6 -type f \( -name "*.apk" -o -name "*.aab" \) -print || true
+
+      # Upload APK/AAB as artifact
+      - name: Upload APK
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: LHD-APK
+          path: |
+            build/**/*.apk
+            build/**/*.aab
+            build/Android
+          retention-days: 14
+
+      # Build summary
+      - name: Build Summary
+        if: always()
+        shell: bash
+        run: |
+          echo "🎮 Unity Build Complete!"
+          echo "📦 Platform: Android"
+          echo "🔢 Unity Version: 6000.3.10f1"
+          if find build -maxdepth 6 -type f \( -name "*.apk" -o -name "*.aab" \) | grep -q .; then
+            echo "✅ APK/AAB produced:"
+            find build -maxdepth 6 -type f \( -name "*.apk" -o -name "*.aab" \) -print
+          else
+            echo "❌ No APK/AAB found. Check unity-editor-log artifact (Editor.log)."
+          fi

@@ -1,0 +1,44 @@
+# Dependencies
+node_modules/
+npm-debug.log*
+
+# Build outputs (will be rebuilt inside Docker)
+dist/
+build/
+
+# Environment / secrets
+.env
+.env.*
+
+# Version control
+.git/
+.github/
+
+# IDE / OS artefacts
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+
+# Unity files (not needed for the web server build)
+Assets/
+ProjectSettings/
+Packages/
+[Ll]ibrary/
+[Tt]emp/
+[Oo]bj/
+[Bb]uild/
+[Bb]uilds/
+[Ll]ogs/
+[Uu]ser[Ss]ettings/
+*.apk
+*.aab
+*.unitypackage
+
+# Docs / misc
+Docs/
+attached_assets/
+setup_local.ps1
+replit.md
