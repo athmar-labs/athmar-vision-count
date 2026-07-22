@@ -90,12 +90,22 @@ jobs:
 
   unity-editmode-tests:
     name: Unity EditMode tests
-    if: ${{ vars.UNITY_CI_ENABLED == 'true' }}
     needs: repository-guardrails
     runs-on: ubuntu-latest
     timeout-minutes: 35
     steps:
       - uses: actions/checkout@v4
+
+      - name: Verify Unity activation secrets
+        shell: bash
+        env:
+          UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
+          UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
+          UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+        run: |
+          test -n "$UNITY_LICENSE"
+          test -n "$UNITY_EMAIL"
+          test -n "$UNITY_PASSWORD"
 
       - name: Run EditMode tests
         uses: game-ci/unity-test-runner@v4
@@ -121,7 +131,7 @@ jobs:
 
   android-release:
     name: Signed Android App Bundle
-    if: ${{ vars.UNITY_CI_ENABLED == 'true' && (github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')) }}
+    if: ${{ github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v') }}
     needs:
       - repository-guardrails
       - unity-editmode-tests
