@@ -77,13 +77,9 @@ See [Customer Model Package Contract](docs/MODEL_PACKAGE.md) for the tensor and 
 
 ## Continuous integration
 
-`Repository guardrails` always runs. After Unity activation is configured, set:
+`Repository guardrails` and Unity EditMode tests run on pull requests and pushes to `main`. The Unity tests use the repository-level `UNITY_LICENSE`, `UNITY_EMAIL` and `UNITY_PASSWORD` secrets; they do not need to be duplicated in the `production` environment.
 
-```text
-UNITY_CI_ENABLED=true
-```
-
-Pull requests then run Unity EditMode tests. A protected manual run or signed `v*` tag materializes the customer-specific private inputs and creates a signed `.aab` plus `.sha256` file. Missing or inconsistent inputs cause the release to fail.
+A protected manual run or signed `v*` tag materializes the customer-specific private inputs and creates a signed `.aab` plus `.sha256` file. Missing or inconsistent inputs cause the release to fail. Repository-level release secrets are available to the protected environment job, although environment-level secrets may be used when customer-specific isolation is required.
 
 ## Commercial deployment
 
