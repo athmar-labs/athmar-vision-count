@@ -142,6 +142,32 @@ jobs:
           fetch-depth: 0
           lfs: true
 
+      # Download ONNX model if YOLOV8N_ONNX_URL secret is set
+      - name: Download ONNX model
+        shell: bash
+        env:
+          YOLOV8N_ONNX_URL: ${{ secrets.YOLOV8N_ONNX_URL }}
+        run: |
+          MODEL_DIR="Assets/Resources/Models"
+          MODEL_PATH="${MODEL_DIR}/yolov8n.onnx"
+          META_PATH="${MODEL_PATH}.meta"
+          if [ -f "$MODEL_PATH" ]; then
+            echo "✅ yolov8n.onnx already present (committed via Git LFS or prior step)."
+          elif [ -n "$YOLOV8N_ONNX_URL" ]; then
+            echo "⬇️  Downloading yolov8n.onnx from YOLOV8N_ONNX_URL..."
+            mkdir -p "$MODEL_DIR"
+            curl -fsSL "$YOLOV8N_ONNX_URL" -o "$MODEL_PATH"
+            echo "✅ yolov8n.onnx downloaded successfully."
+          else
+            echo "⚠️  yolov8n.onnx is missing and YOLOV8N_ONNX_URL secret is not set."
+            echo "   The Unity build will proceed but inference features will be disabled at runtime."
+            # Remove orphaned .meta file to prevent Unity build failure
+            if [ -f "$META_PATH" ]; then
+              echo "🗑️  Removing orphaned ${META_PATH} to allow build to proceed."
+              rm -f "$META_PATH"
+            fi
+          fi
+
       # تخزين مؤقت لمكتبة Unity لتسريع البناء التالي
       # Cache Unity Library folder to speed up future builds
       - name: Cache Unity Library

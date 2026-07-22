@@ -106,6 +106,7 @@ jobs:
         run: |
           MODEL_DIR="Assets/Resources/Models"
           MODEL_PATH="${MODEL_DIR}/yolov8n.onnx"
+          META_PATH="${MODEL_PATH}.meta"
           if [ -f "$MODEL_PATH" ]; then
             echo "✅ yolov8n.onnx already present (committed via Git LFS or prior step)."
           elif [ -n "$YOLOV8N_ONNX_URL" ]; then
@@ -116,6 +117,11 @@ jobs:
           else
             echo "⚠️  yolov8n.onnx is missing and YOLOV8N_ONNX_URL secret is not set."
             echo "   The Unity build will proceed but inference features will be disabled at runtime."
+            # Remove orphaned .meta file to prevent Unity build failure
+            if [ -f "$META_PATH" ]; then
+              echo "🗑️  Removing orphaned ${META_PATH} to allow build to proceed."
+              rm -f "$META_PATH"
+            fi
             echo "   To enable inference:"
             echo "     1. Export the model: python -m ultralytics export model=yolov8n.pt format=onnx imgsz=640"
             echo "     2. Import the .onnx into Unity and place it under Assets/Resources/Models/"
