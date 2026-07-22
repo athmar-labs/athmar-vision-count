@@ -47,6 +47,33 @@ namespace AthmarLabs.VisionCount
             return files;
         }
 
+        public int DeleteExpired(int retentionDays, DateTime? utcNow = null)
+        {
+            if (retentionDays < 1)
+                throw new ArgumentOutOfRangeException(nameof(retentionDays));
+            if (!Directory.Exists(_rootDirectory))
+                return 0;
+
+            var cutoff = (utcNow ?? DateTime.UtcNow).ToUniversalTime().AddDays(-retentionDays);
+            var deleted = 0;
+            foreach (var path in Directory.GetFiles(_rootDirectory, "*.csv", SearchOption.TopDirectoryOnly))
+            {
+                try
+                {
+                    if (File.GetLastWriteTimeUtc(path) > cutoff)
+                        continue;
+                    File.Delete(path);
+                    deleted++;
+                }
+                catch (Exception exception)
+                {
+                    Debug.LogWarning($"Unable to evaluate export retention for '{path}': {exception.Message}");
+                }
+            }
+
+            return deleted;
+        }
+
         public void DeleteAll()
         {
             if (Directory.Exists(_rootDirectory))
