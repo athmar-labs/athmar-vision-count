@@ -1,0 +1,59 @@
+# Unity generated folders
+/[Ll]ibrary/
+/[Tt]emp/
+/[Oo]bj/
+/[Bb]uild/
+/[Bb]uilds/
+/[Ll]ogs/
+/[Uu]ser[Ss]ettings/
+/[Mm]emoryCaptures/
+/[Rr]ecordings/
+
+# IDE and tooling
+.vs/
+.idea/
+.vscode/
+*.csproj
+*.sln
+*.suo
+*.user
+*.userprefs
+*.pidb
+*.booproj
+*.svd
+*.pdb
+*.mdb
+*.opendb
+*.VC.db
+
+# Unity / Rider generated
+*.unityproj
+*.tmp
+*.orig
+*.pidb.meta
+*.pdb.meta
+*.mdb.meta
+sysinfo.txt
+
+# Android signing and sensitive configuration
+*.keystore
+*.jks
+*.p12
+*.pem
+*.key
+*.mobileprovision
+.env
+.env.*
+!.env.example
+
+# ML models and customer datasets are distributed separately
+*.onnx
+*.sentis
+*.tflite
+/Datasets/
+/CustomerData/
+
+# OS files
+.DS_Store
+Thumbs.db
+Desktop.ini
