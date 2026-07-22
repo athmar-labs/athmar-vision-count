@@ -36,12 +36,17 @@ jobs:
           import json
           import pathlib
           import subprocess
-          import sys
 
           required = [
               pathlib.Path("Packages/manifest.json"),
               pathlib.Path("ProjectSettings/ProjectVersion.txt"),
               pathlib.Path("Assets/AthmarVisionCount/Runtime/Athmar.VisionCount.Runtime.asmdef"),
+              pathlib.Path("Assets/AthmarVisionCount/Runtime/VisionCountApp.cs"),
+              pathlib.Path("Assets/AthmarVisionCount/Runtime/VisionInferenceRunner.cs"),
+              pathlib.Path("Assets/AthmarVisionCount/Runtime/YoloOutputDecoder.cs"),
+              pathlib.Path("Assets/AthmarVisionCount/Runtime/SkuCatalogue.cs"),
+              pathlib.Path("Assets/AthmarVisionCount/Editor/ProjectBootstrapper.cs"),
+              pathlib.Path("Assets/AthmarVisionCount/Editor/ProductionReadinessValidator.cs"),
               pathlib.Path("SECURITY.md"),
               pathlib.Path("PRIVACY.md"),
           ]
@@ -49,19 +54,33 @@ jobs:
           if missing:
               raise SystemExit("Missing required files: " + ", ".join(missing))
 
-          json.loads(pathlib.Path("Packages/manifest.json").read_text(encoding="utf-8"))
-          version = pathlib.Path("ProjectSettings/ProjectVersion.txt").read_text(encoding="utf-8")
-          if "6000.3.10f1" not in version:
+          manifest = json.loads(pathlib.Path("Packages/manifest.json").read_text(encoding="utf-8"))
+          dependencies = manifest.get("dependencies", {})
+          expected = {
+              "com.unity.ai.inference": "2.4.1",
+              "com.unity.xr.arcore": "6.4.1",
+              "com.unity.xr.arfoundation": "6.4.1",
+          }
+          for package, version in expected.items():
+              if dependencies.get(package) != version:
+                  raise SystemExit(f"{package} must be pinned to {version}")
+
+          project_version = pathlib.Path("ProjectSettings/ProjectVersion.txt").read_text(encoding="utf-8")
+          if "6000.3.10f1" not in project_version:
               raise SystemExit("Unity editor version is not pinned to 6000.3.10f1")
 
           tracked = subprocess.check_output(["git", "ls-files"], text=True).splitlines()
           forbidden_suffixes = (".keystore", ".jks", ".p12", ".pem", ".key", ".onnx", ".sentis", ".tflite")
+          forbidden_prefixes = (
+              "library/", "temp/", "obj/", "build/", "builds/", "customerdata/", "datasets/",
+              "assets/privatemodels/", "assets/privateconfig/", "assets/generated/", ".ci/",
+          )
           forbidden_paths = []
           for value in tracked:
               lower = value.lower()
               if lower.endswith(forbidden_suffixes) or pathlib.PurePosixPath(lower).name.startswith(".env"):
                   forbidden_paths.append(value)
-              if lower.startswith(("library/", "temp/", "obj/", "build/", "builds/", "customerdata/", "datasets/")):
+              if lower.startswith(forbidden_prefixes):
                   forbidden_paths.append(value)
           if forbidden_paths:
               raise SystemExit("Sensitive or generated files are tracked: " + ", ".join(sorted(set(forbidden_paths))))
@@ -112,15 +131,36 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Materialize approved customer model and catalogue
+        shell: bash
+        env:
+          MODEL_PACKAGE_URL: ${{ secrets.MODEL_PACKAGE_URL }}
+          MODEL_PACKAGE_SHA256: ${{ secrets.MODEL_PACKAGE_SHA256 }}
+          SKU_CATALOGUE_BASE64: ${{ secrets.SKU_CATALOGUE_BASE64 }}
+        run: |
+          set -euo pipefail
+          test -n "$MODEL_PACKAGE_URL"
+          test -n "$MODEL_PACKAGE_SHA256"
+          test -n "$SKU_CATALOGUE_BASE64"
+          mkdir -p Assets/PrivateModels Assets/PrivateConfig
+          curl --fail --silent --show-error --location --proto '=https' --tlsv1.2 \
+            "$MODEL_PACKAGE_URL" \
+            --output Assets/PrivateModels/production.sentis
+          printf '%s  %s\n' "$MODEL_PACKAGE_SHA256" "Assets/PrivateModels/production.sentis" | sha256sum --check --strict
+          printf '%s' "$SKU_CATALOGUE_BASE64" | base64 --decode > Assets/PrivateConfig/sku_catalogue.csv
+          test -s Assets/PrivateConfig/sku_catalogue.csv
+
       - name: Materialize Android signing key
         shell: bash
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
         run: |
+          set -euo pipefail
           test -n "$ANDROID_KEYSTORE_BASE64"
           mkdir -p .ci
           printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > .ci/release.keystore
           chmod 600 .ci/release.keystore
+          test -s .ci/release.keystore
 
       - name: Build validated Android App Bundle
         uses: game-ci/unity-builder@v4
@@ -133,16 +173,48 @@ jobs:
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_ALIAS_PASS: ${{ secrets.ANDROID_KEY_ALIAS_PASS }}
           BUILD_OUTPUT_PATH: ${{ github.workspace }}/Build/AthmarVisionCount.aab
+          ATHMAR_MODEL_ASSET_PATH: Assets/PrivateModels/production.sentis
+          ATHMAR_SKU_CATALOGUE_PATH: Assets/PrivateConfig/sku_catalogue.csv
+          ATHMAR_PRODUCT_NAME: ${{ vars.ATHMAR_PRODUCT_NAME }}
+          ATHMAR_CUSTOMER_CODE: ${{ vars.ATHMAR_CUSTOMER_CODE }}
+          ATHMAR_DEFAULT_LANGUAGE: ${{ vars.ATHMAR_DEFAULT_LANGUAGE }}
+          ATHMAR_MODEL_VERSION: ${{ vars.ATHMAR_MODEL_VERSION }}
+          ATHMAR_CATALOGUE_VERSION: ${{ vars.ATHMAR_CATALOGUE_VERSION }}
+          ATHMAR_PRIVACY_NOTICE_VERSION: ${{ vars.ATHMAR_PRIVACY_NOTICE_VERSION }}
+          ATHMAR_APP_VERSION: ${{ vars.ATHMAR_APP_VERSION }}
+          ATHMAR_ANDROID_VERSION_CODE: ${{ vars.ATHMAR_ANDROID_VERSION_CODE }}
+          ATHMAR_ANDROID_APPLICATION_ID: ${{ vars.ATHMAR_ANDROID_APPLICATION_ID }}
+          ATHMAR_MODEL_INPUT_WIDTH: ${{ vars.ATHMAR_MODEL_INPUT_WIDTH }}
+          ATHMAR_MODEL_INPUT_HEIGHT: ${{ vars.ATHMAR_MODEL_INPUT_HEIGHT }}
+          ATHMAR_MODEL_INPUT_LAYOUT: ${{ vars.ATHMAR_MODEL_INPUT_LAYOUT }}
+          ATHMAR_OUTPUT_TENSOR_INDEX: ${{ vars.ATHMAR_OUTPUT_TENSOR_INDEX }}
+          ATHMAR_OUTPUT_TENSOR_LAYOUT: ${{ vars.ATHMAR_OUTPUT_TENSOR_LAYOUT }}
+          ATHMAR_OUTPUT_HAS_OBJECTNESS: ${{ vars.ATHMAR_OUTPUT_HAS_OBJECTNESS }}
+          ATHMAR_OUTPUT_COORDINATES_NORMALIZED: ${{ vars.ATHMAR_OUTPUT_COORDINATES_NORMALIZED }}
+          ATHMAR_MINIMUM_CONFIDENCE: ${{ vars.ATHMAR_MINIMUM_CONFIDENCE }}
+          ATHMAR_NMS_IOU_THRESHOLD: ${{ vars.ATHMAR_NMS_IOU_THRESHOLD }}
+          ATHMAR_DUPLICATE_IOU_THRESHOLD: ${{ vars.ATHMAR_DUPLICATE_IOU_THRESHOLD }}
+          ATHMAR_TRACK_TTL_SECONDS: ${{ vars.ATHMAR_TRACK_TTL_SECONDS }}
+          ATHMAR_INFERENCE_INTERVAL_SECONDS: ${{ vars.ATHMAR_INFERENCE_INTERVAL_SECONDS }}
+          ATHMAR_MAX_DETECTIONS: ${{ vars.ATHMAR_MAX_DETECTIONS }}
+          ATHMAR_RETENTION_DAYS: ${{ vars.ATHMAR_RETENTION_DAYS }}
         with:
           projectPath: .
           unityVersion: ${{ env.UNITY_VERSION }}
           targetPlatform: Android
           buildMethod: AthmarLabs.VisionCount.Editor.ProductionReadinessValidator.BuildAndroidRelease
 
-      - name: Upload signed App Bundle
+      - name: Upload signed release package
         uses: actions/upload-artifact@v4
         with:
-          name: athmar-vision-count-android-aab
-          path: Build/AthmarVisionCount.aab
+          name: athmar-vision-count-android-release
+          path: |
+            Build/AthmarVisionCount.aab
+            Build/AthmarVisionCount.aab.sha256
           if-no-files-found: error
           retention-days: 30
+
+      - name: Remove customer and signing material
+        if: always()
+        shell: bash
+        run: rm -rf Assets/PrivateModels Assets/PrivateConfig Assets/Generated .ci
