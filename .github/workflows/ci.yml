@@ -147,6 +147,37 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Reclaim runner disk space for Unity Android image
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "Disk space before cleanup:"
+          df -h /
+
+          sudo rm -rf \
+            /usr/share/dotnet \
+            /opt/ghc \
+            /usr/local/lib/android \
+            /usr/local/share/boost \
+            /usr/share/swift \
+            /opt/hostedtoolcache/CodeQL \
+            /usr/local/.ghcup \
+            /usr/local/share/chromium \
+            /opt/google/chrome \
+            /opt/microsoft/msedge || true
+
+          sudo apt-get clean
+          docker system prune --all --force --volumes || true
+
+          echo "Disk space after cleanup:"
+          df -h /
+          available_kb=$(df --output=avail / | tail -n 1 | tr -d ' ')
+          minimum_kb=$((20 * 1024 * 1024))
+          if [ "$available_kb" -lt "$minimum_kb" ]; then
+            echo "At least 20 GiB of free disk space is required before pulling the Unity Android image."
+            exit 1
+          fi
+
       - name: Materialize Android signing key
         shell: bash
         env:
