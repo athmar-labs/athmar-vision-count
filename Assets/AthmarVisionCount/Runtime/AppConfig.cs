@@ -16,7 +16,7 @@ namespace AthmarLabs.VisionCount
     }
 
     [CreateAssetMenu(fileName = "AthmarVisionCountConfig", menuName = "Athmar/Vision Count/App Config")]
-    public sealed class AppConfig : ScriptableObject
+    public sealed class AppConfig : ScriptableObject, IVisionCountConfiguration
     {
         [Header("Product identity")]
         [SerializeField] private string applicationDisplayName = "Athmar Vision Count";
@@ -57,6 +57,7 @@ namespace AthmarLabs.VisionCount
         public string CustomerCode => customerCode;
         public string DefaultLanguage => defaultLanguage;
         public ModelAsset ModelAsset => modelAsset;
+        public string ModelFilePath => string.Empty;
         public TextAsset SkuCatalogueCsv => skuCatalogueCsv;
         public string ModelVersion => modelVersion;
         public string CatalogueVersion => catalogueVersion;
