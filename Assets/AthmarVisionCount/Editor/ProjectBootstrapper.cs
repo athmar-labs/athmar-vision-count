@@ -1,5 +1,6 @@
 using System;
 using System.Globalization;
+using System.Text;
 using UnityEditor;
 using UnityEditor.Build;
 using UnityEditor.SceneManagement;
@@ -14,6 +15,22 @@ namespace AthmarLabs.VisionCount.Editor
         private const string ConfigPath = ConfigDirectory + "/AthmarVisionCountConfig.asset";
         private const string SceneDirectory = GeneratedRoot + "/Scenes";
         private const string ScenePath = SceneDirectory + "/Main.unity";
+        private const string ReleaseConfigArgument = "-athmarReleaseConfigBase64";
+
+        [Serializable]
+        private sealed class ReleaseBuildSettings
+        {
+            public string productName;
+            public string defaultLanguage;
+            public string privacyNoticeVersion;
+            public string appVersion;
+            public string androidVersionCode;
+            public string androidApplicationId;
+            public string retentionDays;
+        }
+
+        private static bool releaseBuildSettingsLoaded;
+        private static ReleaseBuildSettings releaseBuildSettings;
 
         [MenuItem("Athmar/Vision Count/Prepare Production Project")]
         public static void EnsureProductionProject()
@@ -39,10 +56,11 @@ namespace AthmarLabs.VisionCount.Editor
 
         private static void ConfigureAsset(AppConfig config)
         {
+            var settings = GetReleaseBuildSettings();
             var serialized = new SerializedObject(config);
-            SetString(serialized, "applicationDisplayName", ReadEnvironment("ATHMAR_PRODUCT_NAME", "Athmar Vision Count"));
+            SetString(serialized, "applicationDisplayName", ReadValue("ATHMAR_PRODUCT_NAME", settings.productName, "Athmar Vision Count"));
             SetString(serialized, "customerCode", "runtime-configured");
-            SetString(serialized, "defaultLanguage", ReadEnvironment("ATHMAR_DEFAULT_LANGUAGE", "ar"));
+            SetString(serialized, "defaultLanguage", ReadValue("ATHMAR_DEFAULT_LANGUAGE", settings.defaultLanguage, "ar"));
             SetObject(serialized, "modelAsset", null);
             SetObject(serialized, "skuCatalogueCsv", null);
             SetString(serialized, "modelVersion", "runtime");
@@ -63,8 +81,8 @@ namespace AthmarLabs.VisionCount.Editor
             SetFloat(serialized, "trackTtlSeconds", 1.25f);
             SetBoolean(serialized, "requireHumanConfirmation", true);
             SetBoolean(serialized, "storeCapturedImages", false);
-            SetInteger(serialized, "retentionDays", ReadInteger("ATHMAR_RETENTION_DAYS", 30, 1, 365));
-            SetString(serialized, "privacyNoticeVersion", ReadEnvironment("ATHMAR_PRIVACY_NOTICE_VERSION", "1.0"));
+            SetInteger(serialized, "retentionDays", ReadIntegerValue("ATHMAR_RETENTION_DAYS", settings.retentionDays, 30, 1, 365));
+            SetString(serialized, "privacyNoticeVersion", ReadValue("ATHMAR_PRIVACY_NOTICE_VERSION", settings.privacyNoticeVersion, "1.0"));
             SetBoolean(serialized, "networkSyncEnabled", false);
             SetString(serialized, "syncEndpoint", string.Empty);
             serialized.ApplyModifiedPropertiesWithoutUndo();
@@ -85,13 +103,20 @@ namespace AthmarLabs.VisionCount.Editor
 
         private static void ConfigurePlayerSettings()
         {
+            var settings = GetReleaseBuildSettings();
             PlayerSettings.companyName = "Athmar Labs";
-            PlayerSettings.productName = ReadEnvironment("ATHMAR_PRODUCT_NAME", "Athmar Vision Count");
-            PlayerSettings.bundleVersion = ReadEnvironment("ATHMAR_APP_VERSION", "1.0.0");
+            PlayerSettings.productName = ReadValue("ATHMAR_PRODUCT_NAME", settings.productName, "Athmar Vision Count");
+            PlayerSettings.bundleVersion = ReadValue("ATHMAR_APP_VERSION", settings.appVersion, "1.0.0", "VERSION");
             PlayerSettings.SetApplicationIdentifier(
                 NamedBuildTarget.Android,
-                ReadEnvironment("ATHMAR_ANDROID_APPLICATION_ID", "com.athmarlabs.visioncount"));
-            PlayerSettings.Android.bundleVersionCode = ReadInteger("ATHMAR_ANDROID_VERSION_CODE", 1, 1, int.MaxValue);
+                ReadValue("ATHMAR_ANDROID_APPLICATION_ID", settings.androidApplicationId, "com.athmarlabs.visioncount"));
+            PlayerSettings.Android.bundleVersionCode = ReadIntegerValue(
+                "ATHMAR_ANDROID_VERSION_CODE",
+                settings.androidVersionCode,
+                1,
+                1,
+                int.MaxValue,
+                "ANDROID_VERSION_CODE");
             PlayerSettings.Android.minSdkVersion = AndroidSdkVersions.AndroidApiLevel26;
             PlayerSettings.Android.targetSdkVersion = AndroidSdkVersions.AndroidApiLevelAuto;
             PlayerSettings.SetScriptingBackend(NamedBuildTarget.Android, ScriptingImplementation.IL2CPP);
@@ -160,20 +185,80 @@ namespace AthmarLabs.VisionCount.Editor
             return property;
         }
 
-        private static string ReadEnvironment(string name, string fallback)
+        private static string ReadValue(string environmentName, string releaseValue, string fallback, params string[] alternateEnvironmentNames)
         {
-            var value = Environment.GetEnvironmentVariable(name);
-            return string.IsNullOrWhiteSpace(value) ? fallback : value.Trim();
+            var value = Environment.GetEnvironmentVariable(environmentName);
+            if (!string.IsNullOrWhiteSpace(value))
+                return value.Trim();
+
+            if (!string.IsNullOrWhiteSpace(releaseValue))
+                return releaseValue.Trim();
+
+            foreach (var alternateName in alternateEnvironmentNames)
+            {
+                value = Environment.GetEnvironmentVariable(alternateName);
+                if (!string.IsNullOrWhiteSpace(value))
+                    return value.Trim();
+            }
+
+            return fallback;
         }
 
-        private static int ReadInteger(string name, int fallback, int minimum, int maximum)
+        private static int ReadIntegerValue(
+            string environmentName,
+            string releaseValue,
+            int fallback,
+            int minimum,
+            int maximum,
+            params string[] alternateEnvironmentNames)
         {
-            var value = Environment.GetEnvironmentVariable(name);
-            if (string.IsNullOrWhiteSpace(value))
-                return fallback;
+            var value = ReadValue(
+                environmentName,
+                releaseValue,
+                fallback.ToString(CultureInfo.InvariantCulture),
+                alternateEnvironmentNames);
             if (!int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed) || parsed < minimum || parsed > maximum)
-                throw new InvalidOperationException($"Environment variable {name} must be an integer from {minimum} to {maximum}.");
+                throw new InvalidOperationException($"Build setting {environmentName} must be an integer from {minimum} to {maximum}.");
             return parsed;
+        }
+
+        private static ReleaseBuildSettings GetReleaseBuildSettings()
+        {
+            if (releaseBuildSettingsLoaded)
+                return releaseBuildSettings;
+
+            releaseBuildSettingsLoaded = true;
+            releaseBuildSettings = new ReleaseBuildSettings();
+            var encoded = ReadCommandLineArgument(ReleaseConfigArgument);
+            if (string.IsNullOrWhiteSpace(encoded))
+                return releaseBuildSettings;
+
+            try
+            {
+                var json = Encoding.UTF8.GetString(Convert.FromBase64String(encoded.Trim()));
+                releaseBuildSettings = JsonUtility.FromJson<ReleaseBuildSettings>(json) ?? new ReleaseBuildSettings();
+                return releaseBuildSettings;
+            }
+            catch (Exception exception)
+            {
+                throw new InvalidOperationException("The encoded Athmar release configuration is invalid.", exception);
+            }
+        }
+
+        private static string ReadCommandLineArgument(string argumentName)
+        {
+            var arguments = Environment.GetCommandLineArgs();
+            var prefix = argumentName + "=";
+            for (var index = 0; index < arguments.Length; index++)
+            {
+                var argument = arguments[index];
+                if (string.Equals(argument, argumentName, StringComparison.Ordinal) && index + 1 < arguments.Length)
+                    return arguments[index + 1];
+                if (argument.StartsWith(prefix, StringComparison.Ordinal))
+                    return argument.Substring(prefix.Length);
+            }
+
+            return string.Empty;
         }
     }
 }
