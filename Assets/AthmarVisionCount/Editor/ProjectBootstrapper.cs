@@ -1,7 +1,5 @@
 using System;
 using System.Globalization;
-using System.IO;
-using System.Linq;
 using UnityEditor;
 using UnityEditor.Build;
 using UnityEditor.SceneManagement;
@@ -16,8 +14,6 @@ namespace AthmarLabs.VisionCount.Editor
         private const string ConfigPath = ConfigDirectory + "/AthmarVisionCountConfig.asset";
         private const string SceneDirectory = GeneratedRoot + "/Scenes";
         private const string ScenePath = SceneDirectory + "/Main.unity";
-        private const string DefaultModelPath = "Assets/PrivateModels/production.sentis";
-        private const string DefaultCataloguePath = "Assets/PrivateConfig/sku_catalogue.csv";
 
         [MenuItem("Athmar/Vision Count/Prepare Production Project")]
         public static void EnsureProductionProject()
@@ -38,44 +34,39 @@ namespace AthmarLabs.VisionCount.Editor
             ConfigurePlayerSettings();
             AssetDatabase.SaveAssets();
             AssetDatabase.Refresh(ImportAssetOptions.ForceSynchronousImport);
-            Debug.Log("Athmar Vision Count production project settings were prepared.");
+            Debug.Log("Athmar Vision Count generic runtime-configured project settings were prepared.");
         }
 
         private static void ConfigureAsset(AppConfig config)
         {
-            var modelPath = ReadEnvironment("ATHMAR_MODEL_ASSET_PATH", DefaultModelPath);
-            var cataloguePath = ReadEnvironment("ATHMAR_SKU_CATALOGUE_PATH", DefaultCataloguePath);
-            var modelAsset = AssetDatabase.LoadAssetAtPath<UnityEngine.Object>(modelPath);
-            var catalogueAsset = AssetDatabase.LoadAssetAtPath<TextAsset>(cataloguePath);
-
             var serialized = new SerializedObject(config);
             SetString(serialized, "applicationDisplayName", ReadEnvironment("ATHMAR_PRODUCT_NAME", "Athmar Vision Count"));
-            SetString(serialized, "customerCode", ReadEnvironment("ATHMAR_CUSTOMER_CODE", "pilot"));
-            SetString(serialized, "defaultLanguage", ReadEnvironment("ATHMAR_DEFAULT_LANGUAGE", "en"));
-            SetObject(serialized, "modelAsset", modelAsset);
-            SetObject(serialized, "skuCatalogueCsv", catalogueAsset);
-            SetString(serialized, "modelVersion", ReadEnvironment("ATHMAR_MODEL_VERSION", "unassigned"));
-            SetString(serialized, "catalogueVersion", ReadEnvironment("ATHMAR_CATALOGUE_VERSION", "unassigned"));
-            SetInteger(serialized, "modelInputWidth", ReadInteger("ATHMAR_MODEL_INPUT_WIDTH", 640, 32, 4096));
-            SetInteger(serialized, "modelInputHeight", ReadInteger("ATHMAR_MODEL_INPUT_HEIGHT", 640, 32, 4096));
-            SetEnum(serialized, "modelInputLayout", ReadEnvironment("ATHMAR_MODEL_INPUT_LAYOUT", "Nchw"), typeof(ModelInputLayout));
-            SetInteger(serialized, "outputTensorIndex", ReadInteger("ATHMAR_OUTPUT_TENSOR_INDEX", 0, 0, 32));
-            SetEnum(serialized, "outputTensorLayout", ReadEnvironment("ATHMAR_OUTPUT_TENSOR_LAYOUT", "ChannelsFirst"), typeof(DetectionTensorLayout));
-            SetBoolean(serialized, "outputHasObjectness", ReadBoolean("ATHMAR_OUTPUT_HAS_OBJECTNESS", false));
-            SetBoolean(serialized, "outputCoordinatesNormalized", ReadBoolean("ATHMAR_OUTPUT_COORDINATES_NORMALIZED", false));
-            SetInteger(serialized, "maxDetections", ReadInteger("ATHMAR_MAX_DETECTIONS", 100, 1, 500));
-            SetBoolean(serialized, "preferGpu", ReadBoolean("ATHMAR_PREFER_GPU", true));
-            SetFloat(serialized, "inferenceIntervalSeconds", ReadFloat("ATHMAR_INFERENCE_INTERVAL_SECONDS", 0.25f, 0.05f, 5f));
-            SetFloat(serialized, "minimumConfidence", ReadFloat("ATHMAR_MINIMUM_CONFIDENCE", 0.65f, 0f, 1f));
-            SetFloat(serialized, "duplicateIouThreshold", ReadFloat("ATHMAR_DUPLICATE_IOU_THRESHOLD", 0.45f, 0f, 1f));
-            SetFloat(serialized, "nonMaxSuppressionIouThreshold", ReadFloat("ATHMAR_NMS_IOU_THRESHOLD", 0.45f, 0f, 1f));
-            SetFloat(serialized, "trackTtlSeconds", ReadFloat("ATHMAR_TRACK_TTL_SECONDS", 1.25f, 0.1f, 30f));
+            SetString(serialized, "customerCode", "runtime-configured");
+            SetString(serialized, "defaultLanguage", ReadEnvironment("ATHMAR_DEFAULT_LANGUAGE", "ar"));
+            SetObject(serialized, "modelAsset", null);
+            SetObject(serialized, "skuCatalogueCsv", null);
+            SetString(serialized, "modelVersion", "runtime");
+            SetString(serialized, "catalogueVersion", "runtime");
+            SetInteger(serialized, "modelInputWidth", 640);
+            SetInteger(serialized, "modelInputHeight", 640);
+            SetEnum(serialized, "modelInputLayout", "Nchw", typeof(ModelInputLayout));
+            SetInteger(serialized, "outputTensorIndex", 0);
+            SetEnum(serialized, "outputTensorLayout", "ChannelsFirst", typeof(DetectionTensorLayout));
+            SetBoolean(serialized, "outputHasObjectness", false);
+            SetBoolean(serialized, "outputCoordinatesNormalized", false);
+            SetInteger(serialized, "maxDetections", 100);
+            SetBoolean(serialized, "preferGpu", true);
+            SetFloat(serialized, "inferenceIntervalSeconds", 0.25f);
+            SetFloat(serialized, "minimumConfidence", 0.65f);
+            SetFloat(serialized, "duplicateIouThreshold", 0.45f);
+            SetFloat(serialized, "nonMaxSuppressionIouThreshold", 0.45f);
+            SetFloat(serialized, "trackTtlSeconds", 1.25f);
             SetBoolean(serialized, "requireHumanConfirmation", true);
             SetBoolean(serialized, "storeCapturedImages", false);
             SetInteger(serialized, "retentionDays", ReadInteger("ATHMAR_RETENTION_DAYS", 30, 1, 365));
-            SetString(serialized, "privacyNoticeVersion", ReadEnvironment("ATHMAR_PRIVACY_NOTICE_VERSION", "draft"));
-            SetBoolean(serialized, "networkSyncEnabled", ReadBoolean("ATHMAR_NETWORK_SYNC_ENABLED", false));
-            SetString(serialized, "syncEndpoint", ReadEnvironment("ATHMAR_SYNC_ENDPOINT", string.Empty));
+            SetString(serialized, "privacyNoticeVersion", ReadEnvironment("ATHMAR_PRIVACY_NOTICE_VERSION", "1.0"));
+            SetBoolean(serialized, "networkSyncEnabled", false);
+            SetString(serialized, "syncEndpoint", string.Empty);
             serialized.ApplyModifiedPropertiesWithoutUndo();
             EditorUtility.SetDirty(config);
         }
@@ -131,8 +122,7 @@ namespace AthmarLabs.VisionCount.Editor
 
         private static void SetObject(SerializedObject serialized, string name, UnityEngine.Object value)
         {
-            var property = RequireProperty(serialized, name);
-            property.objectReferenceValue = value;
+            RequireProperty(serialized, name).objectReferenceValue = value;
         }
 
         private static void SetString(SerializedObject serialized, string name, string value)
@@ -158,7 +148,7 @@ namespace AthmarLabs.VisionCount.Editor
         private static void SetEnum(SerializedObject serialized, string name, string value, Type enumType)
         {
             if (!Enum.TryParse(enumType, value, true, out var parsed))
-                throw new InvalidOperationException($"Environment value '{value}' is not valid for {enumType.Name}.");
+                throw new InvalidOperationException($"Value '{value}' is not valid for {enumType.Name}.");
             RequireProperty(serialized, name).enumValueIndex = Convert.ToInt32(parsed, CultureInfo.InvariantCulture);
         }
 
@@ -184,30 +174,6 @@ namespace AthmarLabs.VisionCount.Editor
             if (!int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed) || parsed < minimum || parsed > maximum)
                 throw new InvalidOperationException($"Environment variable {name} must be an integer from {minimum} to {maximum}.");
             return parsed;
-        }
-
-        private static float ReadFloat(string name, float fallback, float minimum, float maximum)
-        {
-            var value = Environment.GetEnvironmentVariable(name);
-            if (string.IsNullOrWhiteSpace(value))
-                return fallback;
-            if (!float.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var parsed) || parsed < minimum || parsed > maximum)
-                throw new InvalidOperationException($"Environment variable {name} must be a number from {minimum} to {maximum}.");
-            return parsed;
-        }
-
-        private static bool ReadBoolean(string name, bool fallback)
-        {
-            var value = Environment.GetEnvironmentVariable(name);
-            if (string.IsNullOrWhiteSpace(value))
-                return fallback;
-            if (bool.TryParse(value, out var parsed))
-                return parsed;
-            if (value == "1" || value.Equals("yes", StringComparison.OrdinalIgnoreCase))
-                return true;
-            if (value == "0" || value.Equals("no", StringComparison.OrdinalIgnoreCase))
-                return false;
-            throw new InvalidOperationException($"Environment variable {name} must be true or false.");
         }
     }
 }
