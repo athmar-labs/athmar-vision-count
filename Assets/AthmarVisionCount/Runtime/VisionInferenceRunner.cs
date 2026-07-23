@@ -30,7 +30,10 @@ namespace AthmarLabs.VisionCount
         public int VideoRotationAngle => _cameraTexture == null ? 0 : _cameraTexture.videoRotationAngle;
         public bool VideoVerticallyMirrored => _cameraTexture != null && _cameraTexture.videoVerticallyMirrored;
 
-        public void Initialize(IVisionCountConfiguration config, SkuCatalogue catalogue)
+        public void Initialize(
+            IVisionCountConfiguration config,
+            SkuCatalogue catalogue,
+            bool startPaused = false)
         {
             if (config == null)
                 throw new ArgumentNullException(nameof(config));
@@ -43,28 +46,28 @@ namespace AthmarLabs.VisionCount
 
             _config = config;
             _catalogue = catalogue;
+            _paused = startPaused;
             StartCoroutine(StartPipeline());
         }
 
         public void Pause()
         {
-            if (!_running)
-                return;
             _paused = true;
-            StatusChanged?.Invoke("paused");
+            if (_config != null)
+                StatusChanged?.Invoke("paused");
         }
 
         public void Resume()
         {
-            if (!IsReady)
-                return;
             _paused = false;
             _nextInferenceAt = 0d;
-            StatusChanged?.Invoke("scanning");
+            if (IsReady)
+                StatusChanged?.Invoke("scanning");
         }
 
         public void StopPipeline()
         {
+            StopAllCoroutines();
             _running = false;
             _paused = true;
             if (_loopStarted)
@@ -126,8 +129,7 @@ namespace AthmarLabs.VisionCount
             }
 
             _running = true;
-            _paused = false;
-            StatusChanged?.Invoke("scanning");
+            StatusChanged?.Invoke(_paused ? "paused" : "scanning");
             _inferenceLoop = RunInferenceLoop();
             _loopStarted = true;
         }
