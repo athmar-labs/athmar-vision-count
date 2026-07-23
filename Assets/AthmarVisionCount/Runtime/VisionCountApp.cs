@@ -13,7 +13,12 @@ namespace AthmarLabs.VisionCount
 
         private VisionCountView _view;
         private VisionInferenceRunner _inference;
-        private AppConfig _config;
+        private CustomerAdminView _adminView;
+        private CustomerPackageInstaller _installer;
+        private AppConfig _bootstrapConfig;
+        private IVisionCountConfiguration _activeConfig;
+        private CustomerPackageStore _packageStore;
+        private AdminPinStore _pinStore;
         private SkuCatalogue _catalogue;
         private CountingEngine _counting;
         private LocalScanRepository _repository;
@@ -22,6 +27,7 @@ namespace AthmarLabs.VisionCount
         private IReadOnlyDictionary<string, int> _latestCounts = new Dictionary<string, int>();
         private bool _reviewing;
         private bool _initialized;
+        private bool _adminUnlocked;
         private double _deleteConfirmationExpiresAt;
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
@@ -34,6 +40,8 @@ namespace AthmarLabs.VisionCount
             DontDestroyOnLoad(root);
             root.AddComponent<VisionCountView>();
             root.AddComponent<VisionInferenceRunner>();
+            root.AddComponent<CustomerPackageInstaller>();
+            root.AddComponent<CustomerAdminView>();
             root.AddComponent<VisionCountApp>();
         }
 
@@ -41,7 +49,9 @@ namespace AthmarLabs.VisionCount
         {
             _view = GetComponent<VisionCountView>();
             _inference = GetComponent<VisionInferenceRunner>();
-            if (_view == null || _inference == null)
+            _adminView = GetComponent<CustomerAdminView>();
+            _installer = GetComponent<CustomerPackageInstaller>();
+            if (_view == null || _inference == null || _adminView == null || _installer == null)
                 throw new InvalidOperationException("Vision Count runtime components are missing.");
 
             Subscribe();
@@ -62,37 +72,84 @@ namespace AthmarLabs.VisionCount
 
         private void InitializeApplication()
         {
-            try
-            {
-                _config = Resources.Load<AppConfig>(ConfigResourceName);
-                if (_config == null)
-                    throw new InvalidOperationException("Production configuration asset was not found in Resources.");
-                if (_config.StoreCapturedImages)
-                    throw new InvalidOperationException("This privacy-first release does not permit captured image storage.");
-                if (!_config.RequireHumanConfirmation)
-                    throw new InvalidOperationException("Human confirmation must remain enabled.");
-                if (_config.SkuCatalogueCsv == null)
-                    throw new InvalidOperationException("A production SKU catalogue is not assigned.");
+            _repository = new LocalScanRepository();
+            _exports = new ExportFileService();
+            _packageStore = new CustomerPackageStore();
+            _pinStore = new AdminPinStore();
+            _bootstrapConfig = Resources.Load<AppConfig>(ConfigResourceName);
+            _view.SetLanguage(_bootstrapConfig == null ? "ar" : _bootstrapConfig.DefaultLanguage);
 
-                _catalogue = SkuCatalogue.Parse(_config.SkuCatalogueCsv.text);
-                _counting = new CountingEngine(
-                    _config.MinimumConfidence,
-                    _config.DuplicateIouThreshold,
-                    _config.TrackTtlSeconds);
-                _repository = new LocalScanRepository();
-                _exports = new ExportFileService();
-
-                _view.SetLanguage(_config.DefaultLanguage);
-                _view.ShowCounts(_latestCounts, _catalogue);
-                _inference.Initialize(_config, _catalogue);
-                _initialized = true;
-            }
-            catch (Exception exception)
+            if (_packageStore.TryLoadActive(out var snapshot, out var packageError))
             {
-                _initialized = false;
-                _view.SetStatusMessage(LocalizeError(exception.Message), true);
-                Debug.LogError(exception);
+                try
+                {
+                    ActivateConfiguration(snapshot.Configuration, snapshot.Catalogue);
+                    return;
+                }
+                catch (Exception exception)
+                {
+                    packageError = exception.Message;
+                }
             }
+
+            if (_bootstrapConfig != null && _bootstrapConfig.ModelAsset != null && _bootstrapConfig.SkuCatalogueCsv != null)
+            {
+                try
+                {
+                    ActivateConfiguration(_bootstrapConfig, SkuCatalogue.Parse(_bootstrapConfig.SkuCatalogueCsv.text));
+                    return;
+                }
+                catch (Exception exception)
+                {
+                    packageError = exception.Message;
+                }
+            }
+
+            EnterConfigurationRequiredState(packageError);
+        }
+
+        private void ActivateConfiguration(IVisionCountConfiguration config, SkuCatalogue catalogue)
+        {
+            if (config == null)
+                throw new ArgumentNullException(nameof(config));
+            if (catalogue == null)
+                throw new ArgumentNullException(nameof(catalogue));
+            if (config.StoreCapturedImages)
+                throw new InvalidOperationException("Captured image storage is disabled in this privacy-first release.");
+            if (!config.RequireHumanConfirmation)
+                throw new InvalidOperationException("Human confirmation must remain enabled.");
+
+            _inference.StopPipeline();
+            _reviewing = false;
+            _reviewSession = null;
+            _latestCounts = new Dictionary<string, int>();
+            _activeConfig = config;
+            _catalogue = catalogue;
+            _counting = new CountingEngine(
+                config.MinimumConfidence,
+                config.DuplicateIouThreshold,
+                config.TrackTtlSeconds);
+
+            _view.HideReview();
+            _view.SetLanguage(config.DefaultLanguage);
+            _view.ShowCounts(_latestCounts, _catalogue);
+            _view.ShowDetections(Array.Empty<Detection>(), _catalogue);
+            _inference.Initialize(config, _catalogue);
+            _initialized = true;
+            _adminUnlocked = false;
+        }
+
+        private void EnterConfigurationRequiredState(string error)
+        {
+            _initialized = false;
+            _activeConfig = null;
+            _catalogue = null;
+            _counting = null;
+            _inference.StopPipeline();
+            _view.SetStatus("configuration_required");
+            if (!string.IsNullOrWhiteSpace(error))
+                _view.SetStatusMessage(LocalizeError(error), true);
+            _adminView.ShowLocked(_pinStore.HasPin, true);
         }
 
         private void Subscribe()
@@ -107,6 +164,15 @@ namespace AthmarLabs.VisionCount
             _view.DeleteDataRequested += DeleteAllData;
             _view.LanguageToggleRequested += ToggleLanguage;
             _view.ManualCountRequested += SetManualCount;
+            _adminView.AdministrationRequested += OpenAdministration;
+            _adminView.PinSetupRequested += SetupAdminPin;
+            _adminView.UnlockRequested += UnlockAdministration;
+            _adminView.InstallRequested += InstallCustomerPackage;
+            _adminView.RollbackRequested += RollbackCustomerPackage;
+            _adminView.CloseRequested += CloseAdministration;
+            _installer.ProgressChanged += HandleInstallationProgress;
+            _installer.InstallationCompleted += HandleInstallationCompleted;
+            _installer.InstallationFailed += HandleInstallationFailed;
         }
 
         private void Unsubscribe()
@@ -128,6 +194,135 @@ namespace AthmarLabs.VisionCount
                 _view.LanguageToggleRequested -= ToggleLanguage;
                 _view.ManualCountRequested -= SetManualCount;
             }
+
+            if (_adminView != null)
+            {
+                _adminView.AdministrationRequested -= OpenAdministration;
+                _adminView.PinSetupRequested -= SetupAdminPin;
+                _adminView.UnlockRequested -= UnlockAdministration;
+                _adminView.InstallRequested -= InstallCustomerPackage;
+                _adminView.RollbackRequested -= RollbackCustomerPackage;
+                _adminView.CloseRequested -= CloseAdministration;
+            }
+
+            if (_installer != null)
+            {
+                _installer.ProgressChanged -= HandleInstallationProgress;
+                _installer.InstallationCompleted -= HandleInstallationCompleted;
+                _installer.InstallationFailed -= HandleInstallationFailed;
+            }
+        }
+
+        private void OpenAdministration()
+        {
+            if (_initialized)
+                _inference.Pause();
+            _adminUnlocked = false;
+            _adminView.ShowLocked(_pinStore.HasPin, !_initialized);
+        }
+
+        private void SetupAdminPin(string pin)
+        {
+            try
+            {
+                _pinStore.SetInitialPin(pin);
+                _adminUnlocked = true;
+                _adminView.ShowUnlocked(_activeConfig?.CustomerCode, _packageStore.HasPreviousPackage);
+                _adminView.SetStatus("تم إنشاء رمز المدير. احتفظ به في مكان آمن.");
+            }
+            catch (Exception exception)
+            {
+                _adminView.SetStatus(exception.Message, true);
+            }
+        }
+
+        private void UnlockAdministration(string pin)
+        {
+            if (!_pinStore.Verify(pin))
+            {
+                _adminView.SetStatus("رمز المدير غير صحيح / Incorrect administrator PIN", true);
+                return;
+            }
+
+            _adminUnlocked = true;
+            _adminView.ShowUnlocked(_activeConfig?.CustomerCode, _packageStore.HasPreviousPackage);
+        }
+
+        private void InstallCustomerPackage(string manifestUrl, string manifestSha256)
+        {
+            if (!_adminUnlocked)
+            {
+                _adminView.SetStatus("يجب فتح لوحة الإدارة أولًا / Unlock administration first", true);
+                return;
+            }
+
+            try
+            {
+                _adminView.SetBusy(true);
+                _installer.Install(manifestUrl, manifestSha256, _packageStore);
+            }
+            catch (Exception exception)
+            {
+                _adminView.SetBusy(false);
+                _adminView.SetStatus(exception.Message, true);
+            }
+        }
+
+        private void RollbackCustomerPackage()
+        {
+            if (!_adminUnlocked)
+                return;
+
+            try
+            {
+                _adminView.SetBusy(true);
+                var snapshot = _packageStore.Rollback();
+                ActivateConfiguration(snapshot.Configuration, snapshot.Catalogue);
+                _adminUnlocked = true;
+                _adminView.ShowUnlocked(snapshot.Configuration.CustomerCode, _packageStore.HasPreviousPackage);
+                _adminView.SetStatus("تم الرجوع إلى حزمة العميل السابقة / Previous package restored");
+            }
+            catch (Exception exception)
+            {
+                _adminView.SetBusy(false);
+                _adminView.SetStatus(exception.Message, true);
+            }
+        }
+
+        private void CloseAdministration()
+        {
+            if (!_initialized)
+                return;
+            _adminUnlocked = false;
+            _adminView.Hide();
+            _inference.Resume();
+        }
+
+        private void HandleInstallationProgress(string message)
+        {
+            _adminView.SetStatus(message);
+        }
+
+        private void HandleInstallationCompleted(CustomerPackageSnapshot snapshot)
+        {
+            try
+            {
+                ActivateConfiguration(snapshot.Configuration, snapshot.Catalogue);
+                _adminUnlocked = true;
+                _adminView.ShowUnlocked(snapshot.Configuration.CustomerCode, _packageStore.HasPreviousPackage);
+                _adminView.SetStatus("تم تفعيل حزمة العميل بنجاح / Customer package activated");
+            }
+            catch (Exception exception)
+            {
+                _adminView.SetBusy(false);
+                _adminView.SetStatus(exception.Message, true);
+            }
+        }
+
+        private void HandleInstallationFailed(string message)
+        {
+            _adminView.SetBusy(false);
+            _adminView.SetStatus(message, true);
         }
 
         private void HandleDetections(IReadOnlyList<Detection> detections)
