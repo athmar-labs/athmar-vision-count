@@ -31,6 +31,7 @@ namespace AthmarLabs.VisionCount
         private Button _closeButton;
         private bool _pinConfigured;
         private bool _configurationRequired;
+        private bool _hasPreviousPackage;
 
         private void Awake()
         {
@@ -50,6 +51,8 @@ namespace AthmarLabs.VisionCount
             _title.text = pinConfigured
                 ? "دخول المدير / Administrator Access"
                 : "إعداد حماية الإدارة / Secure Administration";
+            _customerText.text = string.Empty;
+            _statusText.color = Color.white;
             _statusText.text = pinConfigured
                 ? "أدخل رمز المدير المكوّن من 6 إلى 12 رقمًا."
                 : "أنشئ رمزًا من 6 إلى 12 رقمًا قبل إعداد العميل.";
@@ -59,6 +62,7 @@ namespace AthmarLabs.VisionCount
 
         public void ShowUnlocked(string customerCode, bool hasPreviousPackage)
         {
+            _hasPreviousPackage = hasPreviousPackage;
             _panel.SetActive(true);
             _packageSection.SetActive(true);
             _pinInput.text = string.Empty;
@@ -66,8 +70,8 @@ namespace AthmarLabs.VisionCount
             _customerText.text = string.IsNullOrWhiteSpace(customerCode)
                 ? "لا توجد حزمة عميل مفعلة / No active customer package"
                 : "العميل الحالي / Active customer: " + customerCode;
+            _statusText.color = Color.white;
             _statusText.text = "أدخل رابط Manifest وبصمة SHA-256 من قناة موثوقة، ثم اضغط تثبيت.";
-            _rollbackButton.interactable = hasPreviousPackage;
             _closeButton.gameObject.SetActive(!_configurationRequired || !string.IsNullOrWhiteSpace(customerCode));
             SetBusy(false);
         }
@@ -82,14 +86,12 @@ namespace AthmarLabs.VisionCount
         {
             _authButton.interactable = !busy;
             _installButton.interactable = !busy;
-            _rollbackButton.interactable = !busy && _rollbackButton.interactable;
+            _rollbackButton.interactable = !busy && _hasPreviousPackage;
             _closeButton.interactable = !busy;
         }
 
         public void Hide()
         {
-            if (_configurationRequired && string.IsNullOrWhiteSpace(_customerText.text))
-                return;
             _panel.SetActive(false);
         }
 
