@@ -178,29 +178,24 @@ jobs:
             exit 1
           fi
 
-      - name: Materialize Android signing key
+      - name: Verify Android signing secrets
         shell: bash
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
-        run: |
-          set -euo pipefail
-          test -n "$ANDROID_KEYSTORE_BASE64"
-          mkdir -p .ci
-          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > .ci/release.keystore
-          chmod 600 .ci/release.keystore
-          test -s .ci/release.keystore
-
-      - name: Build validated generic Android App Bundle
-        uses: game-ci/unity-builder@v4
-        env:
-          UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
-          UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
-          UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
-          ANDROID_KEYSTORE_PATH: ${{ github.workspace }}/.ci/release.keystore
           ANDROID_KEYSTORE_PASS: ${{ secrets.ANDROID_KEYSTORE_PASS }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_ALIAS_PASS: ${{ secrets.ANDROID_KEY_ALIAS_PASS }}
-          BUILD_OUTPUT_PATH: ${{ github.workspace }}/Build/AthmarVisionCount.aab
+        run: |
+          set -euo pipefail
+          test -n "$ANDROID_KEYSTORE_BASE64"
+          test -n "$ANDROID_KEYSTORE_PASS"
+          test -n "$ANDROID_KEY_ALIAS"
+          test -n "$ANDROID_KEY_ALIAS_PASS"
+
+      - name: Encode release configuration
+        id: release-config
+        shell: bash
+        env:
           ATHMAR_PRODUCT_NAME: ${{ vars.ATHMAR_PRODUCT_NAME }}
           ATHMAR_DEFAULT_LANGUAGE: ${{ vars.ATHMAR_DEFAULT_LANGUAGE }}
           ATHMAR_PRIVACY_NOTICE_VERSION: ${{ vars.ATHMAR_PRIVACY_NOTICE_VERSION }}
@@ -208,11 +203,51 @@ jobs:
           ATHMAR_ANDROID_VERSION_CODE: ${{ vars.ATHMAR_ANDROID_VERSION_CODE }}
           ATHMAR_ANDROID_APPLICATION_ID: ${{ vars.ATHMAR_ANDROID_APPLICATION_ID }}
           ATHMAR_RETENTION_DAYS: ${{ vars.ATHMAR_RETENTION_DAYS }}
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import base64
+          import json
+          import os
+
+          payload = {
+              "productName": os.environ.get("ATHMAR_PRODUCT_NAME", ""),
+              "defaultLanguage": os.environ.get("ATHMAR_DEFAULT_LANGUAGE", ""),
+              "privacyNoticeVersion": os.environ.get("ATHMAR_PRIVACY_NOTICE_VERSION", ""),
+              "appVersion": os.environ.get("ATHMAR_APP_VERSION", ""),
+              "androidVersionCode": os.environ.get("ATHMAR_ANDROID_VERSION_CODE", ""),
+              "androidApplicationId": os.environ.get("ATHMAR_ANDROID_APPLICATION_ID", ""),
+              "retentionDays": os.environ.get("ATHMAR_RETENTION_DAYS", ""),
+          }
+          encoded = base64.b64encode(
+              json.dumps(payload, separators=(",", ":")).encode("utf-8")
+          ).decode("ascii")
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              output.write(f"payload={encoded}\n")
+          PY
+
+      - name: Build validated generic Android App Bundle
+        uses: game-ci/unity-builder@v4
+        env:
+          UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
+          UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
+          UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
         with:
           projectPath: .
           unityVersion: ${{ env.UNITY_VERSION }}
           targetPlatform: Android
           buildMethod: AthmarLabs.VisionCount.Editor.ProductionReadinessValidator.BuildAndroidRelease
+          versioning: Custom
+          version: ${{ vars.ATHMAR_APP_VERSION }}
+          androidVersionCode: ${{ vars.ATHMAR_ANDROID_VERSION_CODE }}
+          androidExportType: androidAppBundle
+          androidKeystoreName: release.keystore
+          androidKeystoreBase64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          androidKeystorePass: ${{ secrets.ANDROID_KEYSTORE_PASS }}
+          androidKeyaliasName: ${{ secrets.ANDROID_KEY_ALIAS }}
+          androidKeyaliasPass: ${{ secrets.ANDROID_KEY_ALIAS_PASS }}
+          customParameters: -athmarReleaseConfigBase64 ${{ steps.release-config.outputs.payload }}
+          runAsHostUser: true
 
       - name: Upload signed generic release package
         uses: actions/upload-artifact@v4
@@ -227,4 +262,4 @@ jobs:
       - name: Remove signing and generated material
         if: always()
         shell: bash
-        run: rm -rf Assets/Generated .ci
+        run: sudo rm -rf Assets/Generated release.keystore .ci

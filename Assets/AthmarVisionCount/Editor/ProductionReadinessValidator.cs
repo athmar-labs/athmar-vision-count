@@ -43,13 +43,22 @@ namespace AthmarLabs.VisionCount.Editor
             ProjectBootstrapper.EnsureProductionProject();
             ValidateOrThrow();
 
-            var keystorePath = RequireEnvironment("ANDROID_KEYSTORE_PATH");
+            var keystorePath = RequireFirstEnvironment("ANDROID_KEYSTORE_PATH", "ANDROID_KEYSTORE_NAME");
             var keystorePassword = RequireEnvironment("ANDROID_KEYSTORE_PASS");
-            var keyAlias = RequireEnvironment("ANDROID_KEY_ALIAS");
-            var keyAliasPassword = RequireEnvironment("ANDROID_KEY_ALIAS_PASS");
+            var keyAlias = RequireFirstEnvironment("ANDROID_KEY_ALIAS", "ANDROID_KEYALIAS_NAME");
+            var keyAliasPassword = RequireFirstEnvironment("ANDROID_KEY_ALIAS_PASS", "ANDROID_KEYALIAS_PASS");
             var outputPath = Environment.GetEnvironmentVariable("BUILD_OUTPUT_PATH");
             if (string.IsNullOrWhiteSpace(outputPath))
                 outputPath = Path.Combine("Build", "AthmarVisionCount.aab");
+
+            var projectRoot = Directory.GetParent(Application.dataPath)?.FullName;
+            if (string.IsNullOrWhiteSpace(projectRoot))
+                throw new BuildFailedException("Unable to resolve the Unity project root directory.");
+
+            if (!Path.IsPathRooted(keystorePath))
+                keystorePath = Path.Combine(projectRoot, keystorePath);
+            if (!Path.IsPathRooted(outputPath))
+                outputPath = Path.Combine(projectRoot, outputPath);
 
             keystorePath = Path.GetFullPath(keystorePath);
             outputPath = Path.GetFullPath(outputPath);
@@ -200,7 +209,19 @@ namespace AthmarLabs.VisionCount.Editor
             var value = Environment.GetEnvironmentVariable(variableName);
             if (string.IsNullOrWhiteSpace(value))
                 throw new BuildFailedException($"Required environment variable {variableName} is missing.");
-            return value;
+            return value.Trim();
+        }
+
+        private static string RequireFirstEnvironment(params string[] variableNames)
+        {
+            foreach (var variableName in variableNames)
+            {
+                var value = Environment.GetEnvironmentVariable(variableName);
+                if (!string.IsNullOrWhiteSpace(value))
+                    return value.Trim();
+            }
+
+            throw new BuildFailedException("Required environment variable is missing. Expected one of: " + string.Join(", ", variableNames) + ".");
         }
     }
 }
