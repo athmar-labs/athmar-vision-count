@@ -12,7 +12,7 @@ namespace AthmarLabs.VisionCount
         public event Action<string> StatusChanged;
         public event Action<string> Faulted;
 
-        private AppConfig _config;
+        private IVisionCountConfiguration _config;
         private SkuCatalogue _catalogue;
         private Model _model;
         private Worker _worker;
@@ -30,14 +30,14 @@ namespace AthmarLabs.VisionCount
         public int VideoRotationAngle => _cameraTexture == null ? 0 : _cameraTexture.videoRotationAngle;
         public bool VideoVerticallyMirrored => _cameraTexture != null && _cameraTexture.videoVerticallyMirrored;
 
-        public void Initialize(AppConfig config, SkuCatalogue catalogue)
+        public void Initialize(IVisionCountConfiguration config, SkuCatalogue catalogue)
         {
             if (config == null)
                 throw new ArgumentNullException(nameof(config));
             if (catalogue == null)
                 throw new ArgumentNullException(nameof(catalogue));
-            if (config.ModelAsset == null)
-                throw new InvalidOperationException("A production model is not assigned.");
+            if (config.ModelAsset == null && string.IsNullOrWhiteSpace(config.ModelFilePath))
+                throw new InvalidOperationException("A bundled or runtime customer model is required.");
             if (_running || _worker != null)
                 throw new InvalidOperationException("The inference runner is already initialized.");
 
@@ -86,6 +86,8 @@ namespace AthmarLabs.VisionCount
             _worker?.Dispose();
             _worker = null;
             _model = null;
+            _config = null;
+            _catalogue = null;
         }
 
         private IEnumerator StartPipeline()
@@ -132,7 +134,9 @@ namespace AthmarLabs.VisionCount
 
         private void CreateInferenceResources()
         {
-            _model = ModelLoader.Load(_config.ModelAsset);
+            _model = !string.IsNullOrWhiteSpace(_config.ModelFilePath)
+                ? ModelLoader.Load(_config.ModelFilePath)
+                : ModelLoader.Load(_config.ModelAsset);
             var backend = _config.PreferGpu && SystemInfo.supportsComputeShaders
                 ? BackendType.GPUCompute
                 : BackendType.CPU;
