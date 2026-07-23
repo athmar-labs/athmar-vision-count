@@ -44,6 +44,11 @@ jobs:
               pathlib.Path("Assets/AthmarVisionCount/Runtime/Athmar.VisionCount.Runtime.asmdef"),
               pathlib.Path("Assets/AthmarVisionCount/Runtime/VisionCountApp.cs"),
               pathlib.Path("Assets/AthmarVisionCount/Runtime/VisionInferenceRunner.cs"),
+              pathlib.Path("Assets/AthmarVisionCount/Runtime/CustomerPackageManifest.cs"),
+              pathlib.Path("Assets/AthmarVisionCount/Runtime/CustomerPackageStore.cs"),
+              pathlib.Path("Assets/AthmarVisionCount/Runtime/CustomerPackageInstaller.cs"),
+              pathlib.Path("Assets/AthmarVisionCount/Runtime/CustomerAdminView.cs"),
+              pathlib.Path("Assets/AthmarVisionCount/Runtime/AdminPinStore.cs"),
               pathlib.Path("Assets/AthmarVisionCount/Runtime/YoloOutputDecoder.cs"),
               pathlib.Path("Assets/AthmarVisionCount/Runtime/SkuCatalogue.cs"),
               pathlib.Path("Assets/AthmarVisionCount/Editor/ProjectBootstrapper.cs"),
@@ -131,7 +136,7 @@ jobs:
           retention-days: 14
 
   android-release:
-    name: Signed Android App Bundle
+    name: Signed Generic Android App Bundle
     if: ${{ github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v') }}
     needs:
       - repository-guardrails
@@ -141,25 +146,6 @@ jobs:
     environment: production
     steps:
       - uses: actions/checkout@v4
-
-      - name: Materialize approved customer model and catalogue
-        shell: bash
-        env:
-          MODEL_PACKAGE_URL: ${{ secrets.MODEL_PACKAGE_URL }}
-          MODEL_PACKAGE_SHA256: ${{ secrets.MODEL_PACKAGE_SHA256 }}
-          SKU_CATALOGUE_BASE64: ${{ secrets.SKU_CATALOGUE_BASE64 }}
-        run: |
-          set -euo pipefail
-          test -n "$MODEL_PACKAGE_URL"
-          test -n "$MODEL_PACKAGE_SHA256"
-          test -n "$SKU_CATALOGUE_BASE64"
-          mkdir -p Assets/PrivateModels Assets/PrivateConfig
-          curl --fail --silent --show-error --location --proto '=https' --tlsv1.2 \
-            "$MODEL_PACKAGE_URL" \
-            --output Assets/PrivateModels/production.sentis
-          printf '%s  %s\n' "$MODEL_PACKAGE_SHA256" "Assets/PrivateModels/production.sentis" | sha256sum --check --strict
-          printf '%s' "$SKU_CATALOGUE_BASE64" | base64 --decode > Assets/PrivateConfig/sku_catalogue.csv
-          test -s Assets/PrivateConfig/sku_catalogue.csv
 
       - name: Materialize Android signing key
         shell: bash
@@ -173,7 +159,7 @@ jobs:
           chmod 600 .ci/release.keystore
           test -s .ci/release.keystore
 
-      - name: Build validated Android App Bundle
+      - name: Build validated generic Android App Bundle
         uses: game-ci/unity-builder@v4
         env:
           UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
@@ -184,30 +170,12 @@ jobs:
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_ALIAS_PASS: ${{ secrets.ANDROID_KEY_ALIAS_PASS }}
           BUILD_OUTPUT_PATH: ${{ github.workspace }}/Build/AthmarVisionCount.aab
-          ATHMAR_MODEL_ASSET_PATH: Assets/PrivateModels/production.sentis
-          ATHMAR_SKU_CATALOGUE_PATH: Assets/PrivateConfig/sku_catalogue.csv
           ATHMAR_PRODUCT_NAME: ${{ vars.ATHMAR_PRODUCT_NAME }}
-          ATHMAR_CUSTOMER_CODE: ${{ vars.ATHMAR_CUSTOMER_CODE }}
           ATHMAR_DEFAULT_LANGUAGE: ${{ vars.ATHMAR_DEFAULT_LANGUAGE }}
-          ATHMAR_MODEL_VERSION: ${{ vars.ATHMAR_MODEL_VERSION }}
-          ATHMAR_CATALOGUE_VERSION: ${{ vars.ATHMAR_CATALOGUE_VERSION }}
           ATHMAR_PRIVACY_NOTICE_VERSION: ${{ vars.ATHMAR_PRIVACY_NOTICE_VERSION }}
           ATHMAR_APP_VERSION: ${{ vars.ATHMAR_APP_VERSION }}
           ATHMAR_ANDROID_VERSION_CODE: ${{ vars.ATHMAR_ANDROID_VERSION_CODE }}
           ATHMAR_ANDROID_APPLICATION_ID: ${{ vars.ATHMAR_ANDROID_APPLICATION_ID }}
-          ATHMAR_MODEL_INPUT_WIDTH: ${{ vars.ATHMAR_MODEL_INPUT_WIDTH }}
-          ATHMAR_MODEL_INPUT_HEIGHT: ${{ vars.ATHMAR_MODEL_INPUT_HEIGHT }}
-          ATHMAR_MODEL_INPUT_LAYOUT: ${{ vars.ATHMAR_MODEL_INPUT_LAYOUT }}
-          ATHMAR_OUTPUT_TENSOR_INDEX: ${{ vars.ATHMAR_OUTPUT_TENSOR_INDEX }}
-          ATHMAR_OUTPUT_TENSOR_LAYOUT: ${{ vars.ATHMAR_OUTPUT_TENSOR_LAYOUT }}
-          ATHMAR_OUTPUT_HAS_OBJECTNESS: ${{ vars.ATHMAR_OUTPUT_HAS_OBJECTNESS }}
-          ATHMAR_OUTPUT_COORDINATES_NORMALIZED: ${{ vars.ATHMAR_OUTPUT_COORDINATES_NORMALIZED }}
-          ATHMAR_MINIMUM_CONFIDENCE: ${{ vars.ATHMAR_MINIMUM_CONFIDENCE }}
-          ATHMAR_NMS_IOU_THRESHOLD: ${{ vars.ATHMAR_NMS_IOU_THRESHOLD }}
-          ATHMAR_DUPLICATE_IOU_THRESHOLD: ${{ vars.ATHMAR_DUPLICATE_IOU_THRESHOLD }}
-          ATHMAR_TRACK_TTL_SECONDS: ${{ vars.ATHMAR_TRACK_TTL_SECONDS }}
-          ATHMAR_INFERENCE_INTERVAL_SECONDS: ${{ vars.ATHMAR_INFERENCE_INTERVAL_SECONDS }}
-          ATHMAR_MAX_DETECTIONS: ${{ vars.ATHMAR_MAX_DETECTIONS }}
           ATHMAR_RETENTION_DAYS: ${{ vars.ATHMAR_RETENTION_DAYS }}
         with:
           projectPath: .
@@ -215,7 +183,7 @@ jobs:
           targetPlatform: Android
           buildMethod: AthmarLabs.VisionCount.Editor.ProductionReadinessValidator.BuildAndroidRelease
 
-      - name: Upload signed release package
+      - name: Upload signed generic release package
         uses: actions/upload-artifact@v4
         with:
           name: athmar-vision-count-android-release
@@ -225,7 +193,7 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
-      - name: Remove customer and signing material
+      - name: Remove signing and generated material
         if: always()
         shell: bash
-        run: rm -rf Assets/PrivateModels Assets/PrivateConfig Assets/Generated .ci
+        run: rm -rf Assets/Generated .ci

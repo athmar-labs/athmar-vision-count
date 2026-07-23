@@ -22,7 +22,7 @@ namespace AthmarLabs.VisionCount.Editor
             var errors = CollectErrors();
             if (errors.Count == 0)
             {
-                Debug.Log("Athmar Vision Count passed the automated production-readiness checks.");
+                Debug.Log("Athmar Vision Count passed the generic runtime-configuration production checks.");
                 return;
             }
 
@@ -95,7 +95,7 @@ namespace AthmarLabs.VisionCount.Editor
                     throw new BuildFailedException("Android build reported success but the App Bundle is missing or empty.");
 
                 WriteSha256(outputPath);
-                Debug.Log($"Validated signed Android App Bundle created at {outputPath}.");
+                Debug.Log($"Validated signed generic Android App Bundle created at {outputPath}.");
             }
             finally
             {
@@ -133,7 +133,7 @@ namespace AthmarLabs.VisionCount.Editor
             if (PlayerSettings.Android.bundleVersionCode < 1)
                 errors.Add("Android bundle version code must be at least 1.");
             if ((int)PlayerSettings.Android.minSdkVersion < (int)AndroidSdkVersions.AndroidApiLevel26)
-                errors.Add("Android minimum SDK must be API 26 or higher for the supported pilot baseline.");
+                errors.Add("Android minimum SDK must be API 26 or higher for the supported baseline.");
             if (PlayerSettings.GetScriptingBackend(NamedBuildTarget.Android) != ScriptingImplementation.IL2CPP)
                 errors.Add("Android production builds must use IL2CPP.");
             if ((PlayerSettings.Android.targetArchitectures & AndroidArchitecture.ARM64) == 0)
@@ -142,63 +142,30 @@ namespace AthmarLabs.VisionCount.Editor
             var config = FindConfig(out var configPath);
             if (config == null)
             {
-                errors.Add("Create exactly one AppConfig asset for the production build.");
+                errors.Add("Create exactly one AppConfig asset for the generic production build.");
                 return errors;
             }
 
             if (!configPath.Contains("/Resources/", StringComparison.Ordinal) || !string.Equals(Path.GetFileName(configPath), RequiredConfigFileName, StringComparison.Ordinal))
                 errors.Add($"The AppConfig asset must be named {RequiredConfigFileName} and stored under a Resources folder.");
-            if (config.ModelAsset == null)
-                errors.Add("Assign the customer-approved, legally usable on-device model to AppConfig.");
-            if (config.SkuCatalogueCsv == null)
-                errors.Add("Assign the customer-approved SKU catalogue to AppConfig.");
-            else
-                ValidateCatalogue(config, errors);
-            if (string.IsNullOrWhiteSpace(config.ModelVersion) || string.Equals(config.ModelVersion, "unassigned", StringComparison.OrdinalIgnoreCase))
-                errors.Add("Set the immutable production model version.");
-            if (string.IsNullOrWhiteSpace(config.CatalogueVersion) || string.Equals(config.CatalogueVersion, "unassigned", StringComparison.OrdinalIgnoreCase))
-                errors.Add("Set the immutable production SKU catalogue version.");
-            if (config.ModelInputWidth < 32 || config.ModelInputHeight < 32)
-                errors.Add("Model input dimensions must be at least 32 by 32 pixels.");
-            if (config.InferenceIntervalSeconds < 0.05f)
-                errors.Add("Inference interval is too small for the supported mobile baseline.");
-            if (config.MaxDetections < 1 || config.MaxDetections > 500)
-                errors.Add("Maximum detections must be from 1 to 500.");
+            if (config.ModelAsset != null)
+                errors.Add("The generic release must not embed a customer model; models are installed from the protected in-app administration interface.");
+            if (config.SkuCatalogueCsv != null)
+                errors.Add("The generic release must not embed a customer SKU catalogue.");
             if (!config.RequireHumanConfirmation)
                 errors.Add("Human confirmation must remain mandatory before export or integration.");
             if (config.StoreCapturedImages)
-                errors.Add("Captured image storage is disabled for the privacy-first release; perform a privacy review before enabling it.");
+                errors.Add("Captured image storage is disabled for the privacy-first release.");
             if (config.RetentionDays < 1 || config.RetentionDays > 365)
-                errors.Add("Set local retention between 1 and 365 days and document the customer-approved value.");
+                errors.Add("Set local retention between 1 and 365 days.");
             if (string.IsNullOrWhiteSpace(config.PrivacyNoticeVersion) || string.Equals(config.PrivacyNoticeVersion, "draft", StringComparison.OrdinalIgnoreCase))
-                errors.Add("Set AppConfig privacy notice version to the approved published version.");
+                errors.Add("Set the published generic privacy notice version.");
             if (!string.Equals(config.DefaultLanguage, "ar", StringComparison.OrdinalIgnoreCase) && !string.Equals(config.DefaultLanguage, "en", StringComparison.OrdinalIgnoreCase))
                 errors.Add("Default language must be ar or en.");
-
             if (config.NetworkSyncEnabled)
-            {
-                if (!Uri.TryCreate(config.SyncEndpoint, UriKind.Absolute, out var endpoint) ||
-                    !string.Equals(endpoint.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase))
-                {
-                    errors.Add("Network sync requires a valid HTTPS endpoint.");
-                }
-            }
+                errors.Add("Generic build-time network sync must remain disabled; customer sync is configured by a validated runtime package.");
 
             return errors;
-        }
-
-        private static void ValidateCatalogue(AppConfig config, ICollection<string> errors)
-        {
-            try
-            {
-                var catalogue = SkuCatalogue.Parse(config.SkuCatalogueCsv.text);
-                if (catalogue.Count < 1)
-                    errors.Add("The production SKU catalogue has no active products.");
-            }
-            catch (Exception exception)
-            {
-                errors.Add("The production SKU catalogue is invalid: " + exception.Message);
-            }
         }
 
         private static AppConfig FindConfig(out string assetPath)

@@ -12,7 +12,7 @@ namespace AthmarLabs.VisionCount
         public event Action<string> StatusChanged;
         public event Action<string> Faulted;
 
-        private AppConfig _config;
+        private IVisionCountConfiguration _config;
         private SkuCatalogue _catalogue;
         private Model _model;
         private Worker _worker;
@@ -30,41 +30,44 @@ namespace AthmarLabs.VisionCount
         public int VideoRotationAngle => _cameraTexture == null ? 0 : _cameraTexture.videoRotationAngle;
         public bool VideoVerticallyMirrored => _cameraTexture != null && _cameraTexture.videoVerticallyMirrored;
 
-        public void Initialize(AppConfig config, SkuCatalogue catalogue)
+        public void Initialize(
+            IVisionCountConfiguration config,
+            SkuCatalogue catalogue,
+            bool startPaused = false)
         {
             if (config == null)
                 throw new ArgumentNullException(nameof(config));
             if (catalogue == null)
                 throw new ArgumentNullException(nameof(catalogue));
-            if (config.ModelAsset == null)
-                throw new InvalidOperationException("A production model is not assigned.");
+            if (config.ModelAsset == null && string.IsNullOrWhiteSpace(config.ModelFilePath))
+                throw new InvalidOperationException("A bundled or runtime customer model is required.");
             if (_running || _worker != null)
                 throw new InvalidOperationException("The inference runner is already initialized.");
 
             _config = config;
             _catalogue = catalogue;
+            _paused = startPaused;
             StartCoroutine(StartPipeline());
         }
 
         public void Pause()
         {
-            if (!_running)
-                return;
             _paused = true;
-            StatusChanged?.Invoke("paused");
+            if (_config != null)
+                StatusChanged?.Invoke("paused");
         }
 
         public void Resume()
         {
-            if (!IsReady)
-                return;
             _paused = false;
             _nextInferenceAt = 0d;
-            StatusChanged?.Invoke("scanning");
+            if (IsReady)
+                StatusChanged?.Invoke("scanning");
         }
 
         public void StopPipeline()
         {
+            StopAllCoroutines();
             _running = false;
             _paused = true;
             if (_loopStarted)
@@ -86,6 +89,8 @@ namespace AthmarLabs.VisionCount
             _worker?.Dispose();
             _worker = null;
             _model = null;
+            _config = null;
+            _catalogue = null;
         }
 
         private IEnumerator StartPipeline()
@@ -124,15 +129,16 @@ namespace AthmarLabs.VisionCount
             }
 
             _running = true;
-            _paused = false;
-            StatusChanged?.Invoke("scanning");
+            StatusChanged?.Invoke(_paused ? "paused" : "scanning");
             _inferenceLoop = RunInferenceLoop();
             _loopStarted = true;
         }
 
         private void CreateInferenceResources()
         {
-            _model = ModelLoader.Load(_config.ModelAsset);
+            _model = !string.IsNullOrWhiteSpace(_config.ModelFilePath)
+                ? ModelLoader.Load(_config.ModelFilePath)
+                : ModelLoader.Load(_config.ModelAsset);
             var backend = _config.PreferGpu && SystemInfo.supportsComputeShaders
                 ? BackendType.GPUCompute
                 : BackendType.CPU;
