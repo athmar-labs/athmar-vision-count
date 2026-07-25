@@ -15,7 +15,7 @@ permissions:
 
 concurrency:
   group: vision-count-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 env:
   UNITY_VERSION: 6000.3.10f1
