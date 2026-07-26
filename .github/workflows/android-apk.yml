@@ -1,0 +1,144 @@
+name: Build Signed Android APK
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  UNITY_VERSION: 6000.3.10f1
+
+jobs:
+  android-apk:
+    name: Signed Android APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    environment: production
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Reclaim runner disk space for Unity Android image
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "Disk space before cleanup:"
+          df -h /
+
+          sudo rm -rf \
+            /usr/share/dotnet \
+            /opt/ghc \
+            /usr/local/lib/android \
+            /usr/local/share/boost \
+            /usr/share/swift \
+            /opt/hostedtoolcache/CodeQL \
+            /usr/local/.ghcup \
+            /usr/local/share/chromium \
+            /opt/google/chrome \
+            /opt/microsoft/msedge || true
+
+          sudo apt-get clean
+          docker system prune --all --force --volumes || true
+
+          echo "Disk space after cleanup:"
+          df -h /
+          available_kb=$(df --output=avail / | tail -n 1 | tr -d ' ')
+          minimum_kb=$((20 * 1024 * 1024))
+          if [ "$available_kb" -lt "$minimum_kb" ]; then
+            echo "At least 20 GiB of free disk space is required before pulling the Unity Android image."
+            exit 1
+          fi
+
+      - name: Verify Unity and Android signing secrets
+        shell: bash
+        env:
+          UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
+          UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
+          UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASS: ${{ secrets.ANDROID_KEYSTORE_PASS }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_ALIAS_PASS: ${{ secrets.ANDROID_KEY_ALIAS_PASS }}
+        run: |
+          set -euo pipefail
+          test -n "$UNITY_LICENSE"
+          test -n "$UNITY_EMAIL"
+          test -n "$UNITY_PASSWORD"
+          test -n "$ANDROID_KEYSTORE_BASE64"
+          test -n "$ANDROID_KEYSTORE_PASS"
+          test -n "$ANDROID_KEY_ALIAS"
+          test -n "$ANDROID_KEY_ALIAS_PASS"
+
+      - name: Encode release configuration
+        id: release-config
+        shell: bash
+        env:
+          ATHMAR_PRODUCT_NAME: ${{ vars.ATHMAR_PRODUCT_NAME }}
+          ATHMAR_DEFAULT_LANGUAGE: ${{ vars.ATHMAR_DEFAULT_LANGUAGE }}
+          ATHMAR_PRIVACY_NOTICE_VERSION: ${{ vars.ATHMAR_PRIVACY_NOTICE_VERSION }}
+          ATHMAR_APP_VERSION: ${{ vars.ATHMAR_APP_VERSION }}
+          ATHMAR_ANDROID_VERSION_CODE: ${{ vars.ATHMAR_ANDROID_VERSION_CODE }}
+          ATHMAR_ANDROID_APPLICATION_ID: ${{ vars.ATHMAR_ANDROID_APPLICATION_ID }}
+          ATHMAR_RETENTION_DAYS: ${{ vars.ATHMAR_RETENTION_DAYS }}
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import base64
+          import json
+          import os
+
+          payload = {
+              "productName": os.environ.get("ATHMAR_PRODUCT_NAME", ""),
+              "defaultLanguage": os.environ.get("ATHMAR_DEFAULT_LANGUAGE", ""),
+              "privacyNoticeVersion": os.environ.get("ATHMAR_PRIVACY_NOTICE_VERSION", ""),
+              "appVersion": os.environ.get("ATHMAR_APP_VERSION", ""),
+              "androidVersionCode": os.environ.get("ATHMAR_ANDROID_VERSION_CODE", ""),
+              "androidApplicationId": os.environ.get("ATHMAR_ANDROID_APPLICATION_ID", ""),
+              "retentionDays": os.environ.get("ATHMAR_RETENTION_DAYS", ""),
+          }
+          encoded = base64.b64encode(
+              json.dumps(payload, separators=(",", ":")).encode("utf-8")
+          ).decode("ascii")
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              output.write(f"payload={encoded}\n")
+          PY
+
+      - name: Build validated signed Android APK
+        uses: game-ci/unity-builder@v4
+        env:
+          UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
+          UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
+          UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+        with:
+          projectPath: .
+          unityVersion: ${{ env.UNITY_VERSION }}
+          targetPlatform: Android
+          buildMethod: AthmarLabs.VisionCount.Editor.AndroidApkBuilder.BuildSignedApk
+          versioning: Custom
+          version: ${{ vars.ATHMAR_APP_VERSION }}
+          androidVersionCode: ${{ vars.ATHMAR_ANDROID_VERSION_CODE }}
+          androidExportType: androidPackage
+          androidKeystoreName: release.keystore
+          androidKeystoreBase64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          androidKeystorePass: ${{ secrets.ANDROID_KEYSTORE_PASS }}
+          androidKeyaliasName: ${{ secrets.ANDROID_KEY_ALIAS }}
+          androidKeyaliasPass: ${{ secrets.ANDROID_KEY_ALIAS_PASS }}
+          customParameters: -athmarReleaseConfigBase64 ${{ steps.release-config.outputs.payload }}
+          runAsHostUser: true
+
+      - name: Upload signed APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: athmar-vision-count-android-apk
+          path: |
+            Build/AthmarVisionCount.apk
+            Build/AthmarVisionCount.apk.sha256
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Remove signing and generated material
+        if: always()
+        shell: bash
+        run: sudo rm -rf Assets/Generated release.keystore .ci
