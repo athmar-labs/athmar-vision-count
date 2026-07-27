@@ -1,15 +1,10 @@
 #!/usr/bin/env python3
 """Generate reviewable YOLO pseudo-labels for Athmar Vision Count images.
 
-Pipeline:
-1. Grounding DINO detects binders, water bottles and multifunction printers.
-2. Overlapping image tiles improve recall for small shelf items.
-3. EasyOCR reads each binder crop and maps it to KENT, ROCO or LENO.
-4. Class-aware NMS merges duplicate detections.
-5. YOLO labels, overlays and an audit report are written for human review.
-
-This tool deliberately leaves uncertain binder brands unlabelled instead of guessing.
-Customer images and generated labels must remain outside source control.
+The pipeline uses Grounding DINO to find products, overlapping tiles to improve
+small-object recall, and EasyOCR to classify binder crops as KENT, ROCO or LENO.
+Uncertain brands and suspicious group boxes are retained in review reports but
+are deliberately excluded from YOLO labels instead of being guessed.
 """
 
 from __future__ import annotations
@@ -19,13 +14,12 @@ import csv
 import difflib
 import json
 import math
-import os
 import re
 import sys
 import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Iterable, Iterator, Sequence
+from typing import Mapping, Sequence
 
 CLASS_NAMES = [
     "KENT",
@@ -34,9 +28,14 @@ CLASS_NAMES = [
     "water_bottle",
     "hp_multifunction_printer",
 ]
-
 BRAND_CLASS_IDS = {"KENT": 0, "ROCO": 1, "LENO": 2}
-PROMPT = "a single lever arch file binder. a single ring binder. a water bottle. a multifunction printer."
+PROMPT_LABELS = [
+    "a single lever arch file binder",
+    "a single ring binder",
+    "a water bottle",
+    "a multifunction printer",
+]
+PROMPT = ". ".join(PROMPT_LABELS) + "."
 SUPPORTED_IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".webp"}
 
 
@@ -70,18 +69,15 @@ class Detection:
 
 
 def normalize_text(value: str) -> str:
-    """Normalize OCR text for brand matching."""
     return re.sub(r"[^A-Z0-9]", "", value.upper())
 
 
 def brand_similarity(text: str, brand: str) -> float:
-    """Return the best fuzzy similarity between OCR text fragments and a brand."""
     normalized = normalize_text(text)
     if not normalized:
         return 0.0
     if brand in normalized:
         return 1.0
-
     fragments = [normalize_text(part) for part in re.split(r"\s+", text) if part]
     fragments.append(normalized)
     return max(
@@ -92,18 +88,24 @@ def brand_similarity(text: str, brand: str) -> float:
 
 
 def classify_brand(ocr_text: str, threshold: float = 0.76) -> tuple[int | None, str | None, float]:
-    """Map OCR output to a supported binder brand without guessing below threshold."""
     scored = sorted(
         ((brand_similarity(ocr_text, brand), brand) for brand in BRAND_CLASS_IDS),
         reverse=True,
     )
     best_score, best_brand = scored[0]
     second_score = scored[1][0]
-
-    # Require both an absolute threshold and some separation from the runner-up.
-    if best_score >= threshold and (best_score - second_score >= 0.08 or best_score == 1.0):
+    if best_score >= threshold and (best_score == 1.0 or best_score - second_score >= 0.08):
         return BRAND_CLASS_IDS[best_brand], best_brand, best_score
     return None, None, best_score
+
+
+def detector_family(label: str) -> str:
+    lowered = label.lower()
+    if "bottle" in lowered:
+        return "bottle"
+    if "printer" in lowered:
+        return "printer"
+    return "binder"
 
 
 def intersection_over_union(a: Detection, b: Detection) -> float:
@@ -117,39 +119,27 @@ def intersection_over_union(a: Detection, b: Detection) -> float:
 
 
 def non_maximum_suppression(detections: Sequence[Detection], iou_threshold: float) -> list[Detection]:
-    """Merge duplicate tiled detections while preserving separate neighbouring products."""
     remaining = sorted(detections, key=lambda item: item.detector_score, reverse=True)
     kept: list[Detection] = []
-
     while remaining:
         current = remaining.pop(0)
         kept.append(current)
-        next_remaining: list[Detection] = []
-        for candidate in remaining:
-            same_family = detector_family(current.detector_label) == detector_family(candidate.detector_label)
-            if same_family and intersection_over_union(current, candidate) >= iou_threshold:
-                continue
-            next_remaining.append(candidate)
-        remaining = next_remaining
-
+        remaining = [
+            candidate
+            for candidate in remaining
+            if not (
+                detector_family(current.detector_label)
+                == detector_family(candidate.detector_label)
+                and intersection_over_union(current, candidate) >= iou_threshold
+            )
+        ]
     return kept
 
 
-def detector_family(label: str) -> str:
-    lowered = label.lower()
-    if "bottle" in lowered:
-        return "bottle"
-    if "printer" in lowered:
-        return "printer"
-    return "binder"
-
-
 def tile_regions(width: int, height: int, tile_size: int, overlap: float) -> list[tuple[int, int, int, int, str]]:
-    """Create full-image plus overlapping tile regions."""
     regions = [(0, 0, width, height, "full")]
     if tile_size <= 0 or (width <= tile_size and height <= tile_size):
         return regions
-
     stride = max(1, int(tile_size * (1.0 - overlap)))
 
     def starts(length: int) -> list[int]:
@@ -163,20 +153,21 @@ def tile_regions(width: int, height: int, tile_size: int, overlap: float) -> lis
 
     for top in starts(height):
         for left in starts(width):
-            right = min(width, left + tile_size)
-            bottom = min(height, top + tile_size)
-            regions.append((left, top, right, bottom, f"tile-{left}-{top}"))
+            regions.append(
+                (left, top, min(width, left + tile_size), min(height, top + tile_size), f"tile-{left}-{top}")
+            )
     return regions
 
 
 def box_to_yolo(detection: Detection, image_width: int, image_height: int) -> str:
     if detection.class_id is None:
         raise ValueError("Cannot serialize an unclassified detection")
-    center_x = ((detection.x1 + detection.x2) / 2.0) / image_width
-    center_y = ((detection.y1 + detection.y2) / 2.0) / image_height
-    width = detection.width / image_width
-    height = detection.height / image_height
-    values = [center_x, center_y, width, height]
+    values = [
+        ((detection.x1 + detection.x2) / 2.0) / image_width,
+        ((detection.y1 + detection.y2) / 2.0) / image_height,
+        detection.width / image_width,
+        detection.height / image_height,
+    ]
     values = [min(1.0, max(0.0, value)) for value in values]
     return f"{detection.class_id} " + " ".join(f"{value:.6f}" for value in values)
 
@@ -202,51 +193,69 @@ def choose_device(requested: str) -> str:
 
 
 def load_detector(model_id: str, device: str):
-    import torch
     from transformers import AutoModelForZeroShotObjectDetection, AutoProcessor
 
     processor = AutoProcessor.from_pretrained(model_id)
     model = AutoModelForZeroShotObjectDetection.from_pretrained(model_id)
     model.to(device)
     model.eval()
-    if device == "cuda":
-        model = model.to(dtype=torch.float16)
     return processor, model
 
 
 def load_ocr(device: str):
     import easyocr
 
-    return easyocr.Reader(["en"], gpu=device == "cuda", verbose=False)
+    return easyocr.Reader(["en"], gpu=device.startswith("cuda"), verbose=False)
 
 
-def run_detector_on_crop(
-    crop,
-    processor,
-    model,
-    device: str,
-    box_threshold: float,
-    text_threshold: float,
-):
+def extract_result_labels(result: Mapping[str, object]) -> list[str]:
+    """Normalize Transformers 4.x/5.x Grounding DINO label output."""
+    text_labels = result.get("text_labels")
+    if text_labels is not None:
+        return [str(value) for value in text_labels]
+
+    raw_labels = result.get("labels")
+    if raw_labels is None:
+        return []
+    if hasattr(raw_labels, "detach"):
+        raw_labels = raw_labels.detach().cpu().tolist()
+    labels: list[str] = []
+    for value in raw_labels:  # type: ignore[union-attr]
+        try:
+            index = int(value)
+        except (TypeError, ValueError):
+            labels.append(str(value))
+            continue
+        labels.append(PROMPT_LABELS[index] if 0 <= index < len(PROMPT_LABELS) else str(index))
+    return labels
+
+
+def run_detector_on_crop(crop, processor, model, device: str, box_threshold: float, text_threshold: float):
     import torch
 
-    inputs = processor(images=crop, text=PROMPT, return_tensors="pt")
-    inputs = {key: value.to(device) if hasattr(value, "to") else value for key, value in inputs.items()}
-
+    batch = processor(images=crop, text=PROMPT, return_tensors="pt")
+    inputs = {
+        key: value.to(device) if hasattr(value, "to") else value
+        for key, value in batch.items()
+    }
     with torch.inference_mode():
         outputs = model(**inputs)
 
-    input_ids = inputs.get("input_ids")
     result = processor.post_process_grounded_object_detection(
         outputs,
-        input_ids=input_ids,
+        input_ids=inputs.get("input_ids"),
         threshold=box_threshold,
         text_threshold=text_threshold,
         target_sizes=[(crop.height, crop.width)],
     )[0]
-
-    labels = result.get("text_labels") or result.get("labels") or []
-    return result["boxes"].detach().cpu().tolist(), result["scores"].detach().cpu().tolist(), list(labels)
+    boxes = result["boxes"].detach().cpu().tolist()
+    scores = result["scores"].detach().cpu().tolist()
+    labels = extract_result_labels(result)
+    if not (len(boxes) == len(scores) == len(labels)):
+        raise RuntimeError(
+            f"Grounding DINO output mismatch: boxes={len(boxes)} scores={len(scores)} labels={len(labels)}"
+        )
+    return boxes, scores, labels
 
 
 def collect_detections(
@@ -259,23 +268,17 @@ def collect_detections(
     tile_size: int,
     tile_overlap: float,
     nms_iou: float,
-) -> tuple[object, list[Detection]]:
+):
     from PIL import Image
 
     image = Image.open(image_path).convert("RGB")
     detections: list[Detection] = []
-
     for left, top, right, bottom, tile_name in tile_regions(
         image.width, image.height, tile_size, tile_overlap
     ):
         crop = image.crop((left, top, right, bottom))
         boxes, scores, labels = run_detector_on_crop(
-            crop,
-            processor,
-            model,
-            device,
-            box_threshold,
-            text_threshold,
+            crop, processor, model, device, box_threshold, text_threshold
         )
         for box, score, label in zip(boxes, scores, labels, strict=True):
             x1, y1, x2, y2 = [float(value) for value in box]
@@ -291,7 +294,6 @@ def collect_detections(
             )
             if detection.width >= 8 and detection.height >= 8:
                 detections.append(detection)
-
     return image, non_maximum_suppression(detections, nms_iou)
 
 
@@ -313,12 +315,8 @@ def read_binder_brand(image, detection: Detection, reader, brand_threshold: floa
     from PIL import ImageEnhance, ImageFilter
 
     crop = expanded_crop(image, detection)
-    passes = [
-        crop,
-        ImageEnhance.Contrast(crop.resize((crop.width * 2, crop.height * 2))).enhance(1.5).filter(
-            ImageFilter.SHARPEN
-        ),
-    ]
+    enlarged = crop.resize((max(1, crop.width * 2), max(1, crop.height * 2)))
+    passes = [crop, ImageEnhance.Contrast(enlarged).enhance(1.5).filter(ImageFilter.SHARPEN)]
     texts: list[str] = []
     for candidate in passes:
         try:
@@ -331,7 +329,7 @@ def read_binder_brand(image, detection: Detection, reader, brand_threshold: floa
                 low_text=0.25,
                 mag_ratio=1.5,
             )
-        except Exception as exc:  # OCR failure must not invalidate all other boxes.
+        except Exception as exc:
             texts.append(f"OCR_ERROR:{type(exc).__name__}")
             continue
         for item in results:
@@ -377,16 +375,13 @@ def draw_overlay(image, detections: Sequence[Detection], output_path: Path) -> N
     draw = ImageDraw.Draw(overlay)
     font = ImageFont.load_default()
     colors = ["#ef4444", "#3b82f6", "#22c55e", "#f59e0b", "#a855f7"]
-
     for detection in detections:
         color = colors[detection.class_id] if detection.class_id is not None else "#facc15"
         draw.rectangle((detection.x1, detection.y1, detection.x2, detection.y2), outline=color, width=3)
-        label = detection.class_name or "REVIEW"
-        text = f"{label} {detection.detector_score:.2f}"
+        text = f"{detection.class_name or 'REVIEW'} {detection.detector_score:.2f}"
         text_box = draw.textbbox((detection.x1, detection.y1), text, font=font)
         draw.rectangle(text_box, fill=color)
         draw.text((detection.x1, detection.y1), text, fill="black", font=font)
-
     output_path.parent.mkdir(parents=True, exist_ok=True)
     overlay.save(output_path, quality=92)
 
@@ -402,22 +397,21 @@ def write_image_outputs(
     labels_dir.mkdir(parents=True, exist_ok=True)
     review_dir.mkdir(parents=True, exist_ok=True)
     label_path = labels_dir / f"{image_path.stem}.txt"
-
     if label_path.exists() and label_path.read_text(encoding="utf-8").strip() and not overwrite:
         raise FileExistsError(
-            f"Refusing to replace non-empty {label_path}. Use --overwrite after backing it up."
+            f"Refusing to replace non-empty {label_path}; use --overwrite only after backup."
         )
 
-    accepted = [item for item in detections if item.class_id is not None and item.status == "accepted"]
-    label_lines = [box_to_yolo(item, image.width, image.height) for item in accepted]
-    label_path.write_text("\n".join(label_lines) + ("\n" if label_lines else ""), encoding="utf-8")
-
+    accepted = [
+        item for item in detections if item.class_id is not None and item.status == "accepted"
+    ]
+    lines = [box_to_yolo(item, image.width, image.height) for item in accepted]
+    label_path.write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
     (review_dir / f"{image_path.stem}.json").write_text(
         json.dumps([asdict(item) for item in detections], indent=2, ensure_ascii=False),
         encoding="utf-8",
     )
     draw_overlay(image, detections, review_dir / f"{image_path.stem}.jpg")
-
     return {
         "accepted": len(accepted),
         "review": sum(item.class_id is None for item in detections),
@@ -431,8 +425,8 @@ def write_summary(review_dir: Path, rows: Sequence[dict[str, object]]) -> None:
         json.dumps(rows, indent=2, ensure_ascii=False), encoding="utf-8"
     )
     with (review_dir / "summary.csv").open("w", newline="", encoding="utf-8-sig") as handle:
-        fieldnames = ["image", "accepted", "review", "candidates", "seconds", *CLASS_NAMES]
-        writer = csv.DictWriter(handle, fieldnames=fieldnames)
+        fields = ["image", "accepted", "review", "candidates", "seconds", *CLASS_NAMES]
+        writer = csv.DictWriter(handle, fieldnames=fields)
         writer.writeheader()
         writer.writerows(rows)
 
@@ -441,10 +435,8 @@ def process(args: argparse.Namespace) -> int:
     images_dir = Path(args.images).resolve()
     labels_dir = Path(args.labels).resolve()
     review_dir = Path(args.review).resolve()
-
     if not images_dir.is_dir():
         raise FileNotFoundError(f"Images directory not found: {images_dir}")
-
     files = image_files(images_dir)
     if not files:
         raise FileNotFoundError(f"No supported images found in {images_dir}")
@@ -455,43 +447,39 @@ def process(args: argparse.Namespace) -> int:
     print("Loading OCR model...", flush=True)
     reader = load_ocr(device)
 
-    summary_rows: list[dict[str, object]] = []
+    rows: list[dict[str, object]] = []
     for index, image_path in enumerate(files, start=1):
         started = time.perf_counter()
         print(f"[{index}/{len(files)}] {image_path.name}", flush=True)
         image, detections = collect_detections(
-            image_path=image_path,
-            processor=processor,
-            model=model,
-            device=device,
-            box_threshold=args.box_threshold,
-            text_threshold=args.text_threshold,
-            tile_size=args.tile_size,
-            tile_overlap=args.tile_overlap,
-            nms_iou=args.nms_iou,
+            image_path,
+            processor,
+            model,
+            device,
+            args.box_threshold,
+            args.text_threshold,
+            args.tile_size,
+            args.tile_overlap,
+            args.nms_iou,
         )
-
         for detection in detections:
-            family = detector_family(detection.detector_label)
-            if family == "binder":
+            if detector_family(detection.detector_label) == "binder":
                 read_binder_brand(image, detection, reader, args.brand_threshold)
                 mark_geometry_risks(detection, image.width, image.height)
             else:
                 classify_generic_detection(detection)
 
         counts = write_image_outputs(
-            image=image,
-            image_path=image_path,
-            detections=detections,
-            labels_dir=labels_dir,
-            review_dir=review_dir,
-            overwrite=args.overwrite,
+            image, image_path, detections, labels_dir, review_dir, args.overwrite
         )
         class_counts = {
-            name: sum(item.class_id == class_id and item.status == "accepted" for item in detections)
+            name: sum(
+                item.class_id == class_id and item.status == "accepted"
+                for item in detections
+            )
             for class_id, name in enumerate(CLASS_NAMES)
         }
-        summary_rows.append(
+        rows.append(
             {
                 "image": image_path.name,
                 **counts,
@@ -505,7 +493,7 @@ def process(args: argparse.Namespace) -> int:
             flush=True,
         )
 
-    write_summary(review_dir, summary_rows)
+    write_summary(review_dir, rows)
     print(f"YOLO labels: {labels_dir}")
     print(f"Review overlays and audit reports: {review_dir}")
     print("Uncertain detections were intentionally excluded from YOLO labels.")
