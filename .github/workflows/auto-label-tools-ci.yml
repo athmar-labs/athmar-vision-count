@@ -1,0 +1,38 @@
+name: Auto-label Tools CI
+
+on:
+  pull_request:
+    paths:
+      - "tools/auto_label/**"
+      - ".github/workflows/auto-label-tools-ci.yml"
+      - ".gitignore"
+  push:
+    branches:
+      - main
+    paths:
+      - "tools/auto_label/**"
+      - ".github/workflows/auto-label-tools-ci.yml"
+      - ".gitignore"
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Compile automatic labeling tool
+        run: python -m py_compile tools/auto_label/auto_label.py
+
+      - name: Run unit tests
+        working-directory: tools/auto_label
+        run: python -m unittest -v test_auto_label.py

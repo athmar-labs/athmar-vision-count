@@ -52,10 +52,16 @@ sysinfo.txt
 *.onnx
 *.sentis
 *.tflite
+*.pt
+*.pth
 /Assets/PrivateModels/
 /Assets/PrivateConfig/
 /Datasets/
+/dataset/
 /CustomerData/
+/tools/auto_label/.venv/
+/tools/auto_label/.cache/
+/tools/auto_label/output/
 
 # OS files
 .DS_Store

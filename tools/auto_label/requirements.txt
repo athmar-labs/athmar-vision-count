@@ -1,0 +1,9 @@
+# Runtime dependencies for tools/auto_label/auto_label.py
+# Install in an isolated virtual environment. Model weights are downloaded at first run.
+torch>=2.10,<3
+torchvision>=0.25,<1
+transformers>=5.5,<6
+easyocr==1.7.2
+Pillow>=12,<13
+numpy>=2,<3
+safetensors>=0.6,<1
