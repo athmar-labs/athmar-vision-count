@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Text;
 using NUnit.Framework;
@@ -59,6 +60,66 @@ namespace AthmarLabs.VisionCount.Tests
             Assert.AreEqual("customer-a", restored.Configuration.CustomerCode);
         }
 
+        [Test]
+        public void ActivePackageRetentionOverridesBundledFallback()
+        {
+            var store = new CustomerPackageStore(Path.Combine(_root, "packages"));
+            WriteStagingPackage(store, "customer-a", new byte[] { 1, 2, 3 }, retentionDays: 7);
+            store.ActivateStaging();
+            var sessions = new LocalScanRepository(Path.Combine(_root, "sessions"));
+            var exports = new ExportFileService(Path.Combine(_root, "exports"));
+            var now = new DateTime(2026, 7, 22, 12, 0, 0, DateTimeKind.Utc);
+            var expired = BuildSession("active-expired", now.AddDays(-10));
+            sessions.Save(expired);
+            var exportPath = exports.SaveConfirmedSession(expired);
+            File.SetLastWriteTimeUtc(exportPath, now.AddDays(-10));
+
+            LocalRetentionEnforcer.ApplyRetentionPolicy(store, 30, sessions, exports, now);
+
+            Assert.That(sessions.LoadAll(), Is.Empty);
+            Assert.That(File.Exists(exportPath), Is.False);
+        }
+
+        [Test]
+        public void MalformedActivePackageUsesBundledRetentionFallback()
+        {
+            var store = new CustomerPackageStore(Path.Combine(_root, "packages"));
+            WriteStagingPackage(store, "customer-a", new byte[] { 1, 2, 3 }, retentionDays: 7);
+            store.ActivateStaging();
+            File.WriteAllText(Path.Combine(store.ActiveDirectory, CustomerPackageStore.ManifestFileName), "{invalid", Encoding.UTF8);
+            var sessions = new LocalScanRepository(Path.Combine(_root, "sessions"));
+            var exports = new ExportFileService(Path.Combine(_root, "exports"));
+            var now = new DateTime(2026, 7, 22, 12, 0, 0, DateTimeKind.Utc);
+            sessions.Save(BuildSession("fallback-recent", now.AddDays(-10)));
+            sessions.Save(BuildSession("fallback-expired", now.AddDays(-31)));
+
+            LocalRetentionEnforcer.ApplyRetentionPolicy(store, 30, sessions, exports, now);
+
+            var remaining = sessions.LoadAll();
+            Assert.That(remaining, Has.Count.EqualTo(1));
+            Assert.That(remaining[0].SessionId, Is.EqualTo("fallback-recent"));
+        }
+
+        [TestCase(0)]
+        [TestCase(-1)]
+        [TestCase(366)]
+        public void InvalidBundledRetentionNeverDeletesLocalData(int retentionDays)
+        {
+            var store = new CustomerPackageStore(Path.Combine(_root, "packages"));
+            var sessions = new LocalScanRepository(Path.Combine(_root, "sessions"));
+            var exports = new ExportFileService(Path.Combine(_root, "exports"));
+            var now = new DateTime(2026, 7, 22, 12, 0, 0, DateTimeKind.Utc);
+            var oldSession = BuildSession("must-remain", now.AddDays(-400));
+            sessions.Save(oldSession);
+            var exportPath = exports.SaveConfirmedSession(oldSession);
+            File.SetLastWriteTimeUtc(exportPath, now.AddDays(-400));
+
+            LocalRetentionEnforcer.ApplyRetentionPolicy(store, retentionDays, sessions, exports, now);
+
+            Assert.That(sessions.LoadAll(), Has.Count.EqualTo(1));
+            Assert.That(File.Exists(exportPath), Is.True);
+        }
+
         [TestCase("123456")]
         [TestCase("123456789012")]
         public void AdministratorPinAcceptsSixToTwelveDigits(string pin)
@@ -74,10 +135,33 @@ namespace AthmarLabs.VisionCount.Tests
             Assert.Throws<FormatException>(() => AdminPinStore.ValidatePin(pin));
         }
 
-        private static void WriteStagingPackage(CustomerPackageStore store, string customerCode, byte[] modelBytes)
+        private static ScanSessionRecord BuildSession(string sessionId, DateTime completedAtUtc)
+        {
+            return new ScanSessionRecord
+            {
+                SessionId = sessionId,
+                StartedAtUtc = completedAtUtc.AddMinutes(-1).ToString("O"),
+                CompletedAtUtc = completedAtUtc.ToString("O"),
+                Confirmed = true,
+                OperatorReference = "operator",
+                LocationReference = "location",
+                Lines = new List<CountLine>
+                {
+                    new CountLine
+                    {
+                        Sku = "SKU-001",
+                        DisplayName = "Product",
+                        ProposedCount = 1,
+                        ConfirmedCount = 1
+                    }
+                }
+            };
+        }
+
+        private static void WriteStagingPackage(CustomerPackageStore store, string customerCode, byte[] modelBytes, int retentionDays = 30)
         {
             var catalogueBytes = CatalogueBytes();
-            var manifest = CreateManifest(customerCode, modelBytes, catalogueBytes);
+            var manifest = CreateManifest(customerCode, modelBytes, catalogueBytes, retentionDays);
             var staging = store.PrepareStagingDirectory();
             File.WriteAllText(
                 Path.Combine(staging, CustomerPackageStore.ManifestFileName),
@@ -87,7 +171,7 @@ namespace AthmarLabs.VisionCount.Tests
             File.WriteAllBytes(Path.Combine(staging, CustomerPackageStore.CatalogueFileName), catalogueBytes);
         }
 
-        private static CustomerPackageManifest CreateManifest(string customerCode, byte[] modelBytes, byte[] catalogueBytes)
+        private static CustomerPackageManifest CreateManifest(string customerCode, byte[] modelBytes, byte[] catalogueBytes, int retentionDays = 30)
         {
             return new CustomerPackageManifest
             {
@@ -115,7 +199,7 @@ namespace AthmarLabs.VisionCount.Tests
                 duplicateIouThreshold = 0.45f,
                 nonMaxSuppressionIouThreshold = 0.45f,
                 trackTtlSeconds = 1.25f,
-                retentionDays = 30
+                retentionDays = retentionDays
             };
         }
 

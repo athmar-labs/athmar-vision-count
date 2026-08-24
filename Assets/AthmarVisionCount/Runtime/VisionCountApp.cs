@@ -10,6 +10,7 @@ namespace AthmarLabs.VisionCount
     {
         private const string ConfigResourceName = "AthmarVisionCountConfig";
         private const double DeleteConfirmationWindowSeconds = 5d;
+        private const float RetentionIntervalSeconds = 6f * 60f * 60f;
 
         private VisionCountView _view;
         private VisionInferenceRunner _inference;
@@ -60,6 +61,7 @@ namespace AthmarLabs.VisionCount
         private void Start()
         {
             InitializeApplication();
+            InvokeRepeating(nameof(ApplyActiveRetention), RetentionIntervalSeconds, RetentionIntervalSeconds);
         }
 
         private void Update()
@@ -137,6 +139,7 @@ namespace AthmarLabs.VisionCount
             _inference.Initialize(config, _catalogue);
             _initialized = true;
             _adminUnlocked = false;
+            ApplyActiveRetention();
         }
 
         private void EnterConfigurationRequiredState(string error)
@@ -509,8 +512,16 @@ namespace AthmarLabs.VisionCount
             return "تعذر إكمال العملية بأمان: " + message;
         }
 
+        private void ApplyActiveRetention()
+        {
+            if (_activeConfig != null)
+                LocalRetentionEnforcer.ApplyRetentionPolicy(_activeConfig.RetentionDays);
+        }
+
         private void OnApplicationPause(bool paused)
         {
+            if (!paused)
+                ApplyActiveRetention();
             if (!_initialized || _reviewing)
                 return;
 
@@ -522,6 +533,7 @@ namespace AthmarLabs.VisionCount
 
         private void OnDestroy()
         {
+            CancelInvoke(nameof(ApplyActiveRetention));
             Unsubscribe();
         }
     }
