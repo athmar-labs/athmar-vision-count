@@ -33,6 +33,9 @@ namespace AthmarLabs.VisionCount
         private bool _configurationRequired;
         private bool _hasPreviousPackage;
 
+        public bool IsVisible => _panel != null && _panel.activeSelf;
+        public bool IsUnlocked => IsVisible && _packageSection != null && _packageSection.activeSelf;
+
         private void Awake()
         {
             BuildInterface();

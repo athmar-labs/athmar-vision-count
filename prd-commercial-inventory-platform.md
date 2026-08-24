@@ -274,7 +274,7 @@ The first supported client is Android phones and tablets. iOS/iPadOS feasibility
 
 ### Security and privacy
 
-- **FR-21:** Administrative access must use rate limiting, secure credential storage, session expiry, and reauthentication for destructive actions.
+- **FR-21:** Administrative access must use rate limiting, secure credential storage, session expiry, and reauthentication for destructive actions. Administrator sessions expire absolutely after five minutes, do not extend on activity, and relock immediately when the application enters the background. Five consecutive failed PIN attempts trigger a persisted 15-minute lockout that a wall-clock rollback or process restart must not shorten.
 - **FR-22:** Android and iOS backup policies must exclude protected local records and credentials unless an approved encrypted recovery design exists.
 - **FR-23:** Retention must apply consistently across devices, exports, cloud records, logs, and backups.
 - **FR-24:** Captured images must not persist or upload unless a separate, explicit customer data-collection policy is enabled.
