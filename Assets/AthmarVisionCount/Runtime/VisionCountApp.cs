@@ -27,7 +27,7 @@ namespace AthmarLabs.VisionCount
         private IReadOnlyDictionary<string, int> _latestCounts = new Dictionary<string, int>();
         private bool _reviewing;
         private bool _initialized;
-        private bool _adminUnlocked;
+        private readonly AdminSession _adminSession = new AdminSession();
         private double _deleteConfirmationExpiresAt;
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
@@ -136,7 +136,7 @@ namespace AthmarLabs.VisionCount
             _view.ShowDetections(Array.Empty<Detection>(), _catalogue);
             _inference.Initialize(config, _catalogue);
             _initialized = true;
-            _adminUnlocked = false;
+            _adminSession.End();
         }
 
         private void EnterConfigurationRequiredState(string error)
@@ -217,7 +217,7 @@ namespace AthmarLabs.VisionCount
         {
             if (_initialized)
                 _inference.Pause();
-            _adminUnlocked = false;
+            _adminSession.End();
             _adminView.ShowLocked(_pinStore.HasPin, !_initialized);
         }
 
@@ -226,7 +226,7 @@ namespace AthmarLabs.VisionCount
             try
             {
                 _pinStore.SetInitialPin(pin);
-                _adminUnlocked = true;
+                _adminSession.Start(Time.realtimeSinceStartupAsDouble);
                 _adminView.ShowUnlocked(_activeConfig?.CustomerCode, _packageStore.HasPreviousPackage);
                 _adminView.SetStatus("تم إنشاء رمز المدير. احتفظ به في مكان آمن.");
             }
@@ -244,13 +244,13 @@ namespace AthmarLabs.VisionCount
                 return;
             }
 
-            _adminUnlocked = true;
+            _adminSession.Start(Time.realtimeSinceStartupAsDouble);
             _adminView.ShowUnlocked(_activeConfig?.CustomerCode, _packageStore.HasPreviousPackage);
         }
 
         private void InstallCustomerPackage(string manifestUrl, string manifestSha256)
         {
-            if (!_adminUnlocked)
+            if (!_adminSession.IsActive)
             {
                 _adminView.SetStatus("يجب فتح لوحة الإدارة أولًا / Unlock administration first", true);
                 return;
@@ -270,7 +270,7 @@ namespace AthmarLabs.VisionCount
 
         private void RollbackCustomerPackage()
         {
-            if (!_adminUnlocked)
+            if (!_adminSession.IsActive)
                 return;
 
             try
@@ -278,7 +278,7 @@ namespace AthmarLabs.VisionCount
                 _adminView.SetBusy(true);
                 var snapshot = _packageStore.Rollback();
                 ActivateConfiguration(snapshot.Configuration, snapshot.Catalogue);
-                _adminUnlocked = true;
+                _adminSession.Start(Time.realtimeSinceStartupAsDouble);
                 _adminView.ShowUnlocked(snapshot.Configuration.CustomerCode, _packageStore.HasPreviousPackage);
                 _adminView.SetStatus("تم الرجوع إلى حزمة العميل السابقة / Previous package restored");
             }
@@ -293,7 +293,7 @@ namespace AthmarLabs.VisionCount
         {
             if (!_initialized)
                 return;
-            _adminUnlocked = false;
+            _adminSession.End();
             _adminView.Hide();
             _inference.Resume();
         }
@@ -308,7 +308,7 @@ namespace AthmarLabs.VisionCount
             try
             {
                 ActivateConfiguration(snapshot.Configuration, snapshot.Catalogue);
-                _adminUnlocked = true;
+                _adminSession.Start(Time.realtimeSinceStartupAsDouble);
                 _adminView.ShowUnlocked(snapshot.Configuration.CustomerCode, _packageStore.HasPreviousPackage);
                 _adminView.SetStatus("تم تفعيل حزمة العميل بنجاح / Customer package activated");
             }
