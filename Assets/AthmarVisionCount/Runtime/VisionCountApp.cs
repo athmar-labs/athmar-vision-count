@@ -137,6 +137,7 @@ namespace AthmarLabs.VisionCount
             _inference.Initialize(config, _catalogue);
             _initialized = true;
             _adminSession.End();
+            _adminView.ShowLocked(_pinStore.HasPin, true);
         }
 
         private void EnterConfigurationRequiredState(string error)
@@ -492,6 +493,7 @@ namespace AthmarLabs.VisionCount
 
         private void ToggleLanguage()
         {
+            OpenAdministration();
             var language = VisionCountLocalization.IsArabic(_view.Language) ? "en" : "ar";
             _view.SetLanguage(language);
             if (_catalogue != null)
