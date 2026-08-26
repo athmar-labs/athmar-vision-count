@@ -1,3 +1,4 @@
+using System.Reflection;
 using NUnit.Framework;
 using UnityEngine;
 using UnityEngine.EventSystems;
@@ -24,8 +25,10 @@ namespace AthmarLabs.VisionCount.Tests
         {
             var existingEventSystem = Object.FindFirstObjectByType<EventSystem>();
             _root = new GameObject("Test UI", typeof(RectTransform));
-            _root.AddComponent<VisionCountView>();
+            var mainView = _root.AddComponent<VisionCountView>();
+            InvokeAwake(mainView);
             var view = _root.AddComponent<CustomerAdminView>();
+            InvokeAwake(view);
             if (existingEventSystem == null)
                 _createdEventSystem = Object.FindFirstObjectByType<EventSystem>();
 
@@ -49,6 +52,13 @@ namespace AthmarLabs.VisionCount.Tests
 
             Assert.That(authentication.gameObject.activeSelf, Is.False);
             Assert.That(package.gameObject.activeSelf, Is.True);
+        }
+
+        private static void InvokeAwake(MonoBehaviour behaviour)
+        {
+            var awake = behaviour.GetType().GetMethod("Awake", BindingFlags.Instance | BindingFlags.NonPublic);
+            Assert.That(awake, Is.Not.Null);
+            awake.Invoke(behaviour, null);
         }
 
         private static int FindChildrenNamed(Transform parent, string name)
