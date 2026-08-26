@@ -24,10 +24,8 @@ namespace AthmarLabs.VisionCount.Tests
         {
             var existingEventSystem = Object.FindFirstObjectByType<EventSystem>();
             _root = new GameObject("Test UI", typeof(RectTransform));
-            var mainView = _root.AddComponent<VisionCountView>();
-            mainView.SendMessage("Awake");
+            _root.AddComponent<VisionCountView>();
             var view = _root.AddComponent<CustomerAdminView>();
-            view.SendMessage("Awake");
             if (existingEventSystem == null)
                 _createdEventSystem = Object.FindFirstObjectByType<EventSystem>();
 
