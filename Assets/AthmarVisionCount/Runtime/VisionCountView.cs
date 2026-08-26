@@ -67,6 +67,7 @@ namespace AthmarLabs.VisionCount
             _reviewButtonText.text = VisionCountLocalization.Text("review", _language);
             _deleteButtonText.text = VisionCountLocalization.Text("delete_data", _language);
             _languageButtonText.text = VisionCountLocalization.Text("language", _language);
+            _adminButtonText.text = VisionCountLocalization.Text("administration", _language);
             _reviewTitleText.text = VisionCountLocalization.Text("review_title", _language);
             _confirmButtonText.text = VisionCountLocalization.Text("confirm_export", _language);
             _cancelButtonText.text = VisionCountLocalization.Text("cancel", _language);
@@ -192,34 +193,27 @@ namespace AthmarLabs.VisionCount
             var headerImage = header.gameObject.AddComponent<Image>();
             headerImage.color = new Color(0.08f, 0.12f, 0.17f, 1f);
 
-            _titleText = CreateText("Title", header, 38, FontStyle.Bold, TextAnchor.MiddleLeft);
-            _titleText.rectTransform.anchorMin = new Vector2(0.035f, 0f);
-            _titleText.rectTransform.anchorMax = new Vector2(0.75f, 1f);
+            _titleText = CreateText("Title", header, 34, FontStyle.Bold, TextAnchor.MiddleCenter);
+            _titleText.rectTransform.anchorMin = new Vector2(0.24f, 0f);
+            _titleText.rectTransform.anchorMax = new Vector2(0.76f, 1f);
             _titleText.rectTransform.offsetMin = Vector2.zero;
             _titleText.rectTransform.offsetMax = Vector2.zero;
 
-            // Make language button larger and more prominent
             var languageButton = CreateButton("Language", header, out _languageButtonText);
             var languageRect = languageButton.GetComponent<RectTransform>();
-            languageRect.anchorMin = new Vector2(0.78f, 0.16f);
-            languageRect.anchorMax = new Vector2(0.97f, 0.84f);
+            languageRect.anchorMin = new Vector2(0.78f, 0.14f);
+            languageRect.anchorMax = new Vector2(0.97f, 0.86f);
             languageRect.offsetMin = Vector2.zero;
             languageRect.offsetMax = Vector2.zero;
             languageButton.onClick.AddListener(() => LanguageToggleRequested?.Invoke());
-            // Increase button size for better mobile touch target
-            languageButton.transform.GetChild(0).GetComponent<RectTransform>().sizeDelta = new Vector2(120f, 48f);
 
-            // Add prominent admin button
             var adminButton = CreateButton("Admin", header, out _adminButtonText);
             var adminRect = adminButton.GetComponent<RectTransform>();
-            adminRect.anchorMin = new Vector2(0.03f, 0.16f);
-            adminRect.anchorMax = new Vector2(0.22f, 0.84f);
+            adminRect.anchorMin = new Vector2(0.03f, 0.14f);
+            adminRect.anchorMax = new Vector2(0.22f, 0.86f);
             adminRect.offsetMin = Vector2.zero;
             adminRect.offsetMax = Vector2.zero;
             adminButton.onClick.AddListener(() => AdministrationRequested?.Invoke());
-            // Increase button size for better mobile touch target
-            adminButton.transform.GetChild(0).GetComponent<RectTransform>().sizeDelta = new Vector2(120f, 48f);
-            _adminButtonText.text = _language == "ar" ? "إدارة" : "Admin";
 
             var cameraPanel = CreateRect("CameraPanel", root);
             cameraPanel.anchorMin = new Vector2(0.025f, 0.42f);
@@ -251,7 +245,6 @@ namespace AthmarLabs.VisionCount
             statusBackground.effectColor = Color.black;
             statusBackground.effectDistance = new Vector2(2f, -2f);
 
-            // Larger bottom controls area for mobile usability
             var bottom = CreateRect("Bottom", root);
             bottom.anchorMin = new Vector2(0.025f, 0.025f);
             bottom.anchorMax = new Vector2(0.975f, 0.40f);
@@ -275,7 +268,6 @@ namespace AthmarLabs.VisionCount
             _privacyText.rectTransform.offsetMin = Vector2.zero;
             _privacyText.rectTransform.offsetMax = Vector2.zero;
 
-            // Larger controls area for better mobile touch targets
             var controls = CreateRect("Controls", bottom);
             controls.anchorMin = new Vector2(0.025f, 0.02f);
             controls.anchorMax = new Vector2(0.975f, 0.18f);

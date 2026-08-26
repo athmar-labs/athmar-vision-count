@@ -165,7 +165,6 @@ namespace AthmarLabs.VisionCount
             _view.LanguageToggleRequested += ToggleLanguage;
             _view.ManualCountRequested += SetManualCount;
             _view.AdministrationRequested += OpenAdministration;
-            _adminView.AdministrationRequested += OpenAdministration;
             _adminView.PinSetupRequested += SetupAdminPin;
             _adminView.UnlockRequested += UnlockAdministration;
             _adminView.InstallRequested += InstallCustomerPackage;
@@ -194,11 +193,11 @@ namespace AthmarLabs.VisionCount
                 _view.DeleteDataRequested -= DeleteAllData;
                 _view.LanguageToggleRequested -= ToggleLanguage;
                 _view.ManualCountRequested -= SetManualCount;
+                _view.AdministrationRequested -= OpenAdministration;
             }
 
             if (_adminView != null)
             {
-                _adminView.AdministrationRequested -= OpenAdministration;
                 _adminView.PinSetupRequested -= SetupAdminPin;
                 _adminView.UnlockRequested -= UnlockAdministration;
                 _adminView.InstallRequested -= InstallCustomerPackage;
