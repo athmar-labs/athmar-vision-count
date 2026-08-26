@@ -111,12 +111,15 @@ namespace AthmarLabs.VisionCount
             scaler.referenceResolution = new Vector2(1080f, 1920f);
             scaler.matchWidthOrHeight = 0.5f;
 
+            // Make admin button more visible with larger size for mobile
             var gear = CreateButton("Administration", canvasObject.transform, "إدارة / Admin", out _);
             var gearRect = gear.GetComponent<RectTransform>();
-            gearRect.anchorMin = new Vector2(0.02f, 0.935f);
-            gearRect.anchorMax = new Vector2(0.23f, 0.985f);
+            gearRect.anchorMin = new Vector2(0.02f, 0.92f);
+            gearRect.anchorMax = new Vector2(0.28f, 0.99f);
             gearRect.offsetMin = Vector2.zero;
             gearRect.offsetMax = Vector2.zero;
+            // Make button larger and more visible
+            gear.GetComponent<Image>().color = new Color(0.08f, 0.48f, 0.72f, 1f);
             gear.onClick.AddListener(() => AdministrationRequested?.Invoke());
 
             var panelRect = CreateRect("AdministrationPanel", canvasObject.transform);

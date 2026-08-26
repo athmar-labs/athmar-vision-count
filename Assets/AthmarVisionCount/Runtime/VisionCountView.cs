@@ -23,6 +23,7 @@ namespace AthmarLabs.VisionCount
         public event Action DeleteDataRequested;
         public event Action LanguageToggleRequested;
         public event Action<string, int> ManualCountRequested;
+        public event Action AdministrationRequested;
 
         private Font _font;
         private string _language = "en";
@@ -37,6 +38,7 @@ namespace AthmarLabs.VisionCount
         private Text _reviewButtonText;
         private Text _deleteButtonText;
         private Text _languageButtonText;
+        private Text _adminButtonText;
         private GameObject _reviewPanel;
         private Text _reviewTitleText;
         private InputField _operatorInput;
@@ -196,6 +198,7 @@ namespace AthmarLabs.VisionCount
             _titleText.rectTransform.offsetMin = Vector2.zero;
             _titleText.rectTransform.offsetMax = Vector2.zero;
 
+            // Make language button larger and more prominent
             var languageButton = CreateButton("Language", header, out _languageButtonText);
             var languageRect = languageButton.GetComponent<RectTransform>();
             languageRect.anchorMin = new Vector2(0.78f, 0.16f);
@@ -203,10 +206,24 @@ namespace AthmarLabs.VisionCount
             languageRect.offsetMin = Vector2.zero;
             languageRect.offsetMax = Vector2.zero;
             languageButton.onClick.AddListener(() => LanguageToggleRequested?.Invoke());
+            // Increase button size for better mobile touch target
+            languageButton.transform.GetChild(0).GetComponent<RectTransform>().sizeDelta = new Vector2(120f, 48f);
+
+            // Add prominent admin button
+            var adminButton = CreateButton("Admin", header, out _adminButtonText);
+            var adminRect = adminButton.GetComponent<RectTransform>();
+            adminRect.anchorMin = new Vector2(0.03f, 0.16f);
+            adminRect.anchorMax = new Vector2(0.22f, 0.84f);
+            adminRect.offsetMin = Vector2.zero;
+            adminRect.offsetMax = Vector2.zero;
+            adminButton.onClick.AddListener(() => AdministrationRequested?.Invoke());
+            // Increase button size for better mobile touch target
+            adminButton.transform.GetChild(0).GetComponent<RectTransform>().sizeDelta = new Vector2(120f, 48f);
+            _adminButtonText.text = _language == "ar" ? "إدارة" : "Admin";
 
             var cameraPanel = CreateRect("CameraPanel", root);
-            cameraPanel.anchorMin = new Vector2(0.025f, 0.39f);
-            cameraPanel.anchorMax = new Vector2(0.975f, 0.93f);
+            cameraPanel.anchorMin = new Vector2(0.025f, 0.42f);
+            cameraPanel.anchorMax = new Vector2(0.975f, 0.92f);
             cameraPanel.offsetMin = Vector2.zero;
             cameraPanel.offsetMax = Vector2.zero;
             var cameraBackground = cameraPanel.gameObject.AddComponent<Image>();
@@ -234,9 +251,10 @@ namespace AthmarLabs.VisionCount
             statusBackground.effectColor = Color.black;
             statusBackground.effectDistance = new Vector2(2f, -2f);
 
+            // Larger bottom controls area for mobile usability
             var bottom = CreateRect("Bottom", root);
             bottom.anchorMin = new Vector2(0.025f, 0.025f);
-            bottom.anchorMax = new Vector2(0.975f, 0.37f);
+            bottom.anchorMax = new Vector2(0.975f, 0.40f);
             bottom.offsetMin = Vector2.zero;
             bottom.offsetMax = Vector2.zero;
             var bottomImage = bottom.gameObject.AddComponent<Image>();
@@ -257,13 +275,14 @@ namespace AthmarLabs.VisionCount
             _privacyText.rectTransform.offsetMin = Vector2.zero;
             _privacyText.rectTransform.offsetMax = Vector2.zero;
 
+            // Larger controls area for better mobile touch targets
             var controls = CreateRect("Controls", bottom);
-            controls.anchorMin = new Vector2(0.025f, 0.025f);
-            controls.anchorMax = new Vector2(0.975f, 0.155f);
+            controls.anchorMin = new Vector2(0.025f, 0.02f);
+            controls.anchorMax = new Vector2(0.975f, 0.18f);
             controls.offsetMin = Vector2.zero;
             controls.offsetMax = Vector2.zero;
             var controlsLayout = controls.gameObject.AddComponent<HorizontalLayoutGroup>();
-            controlsLayout.spacing = 14f;
+            controlsLayout.spacing = 12f;
             controlsLayout.childAlignment = TextAnchor.MiddleCenter;
             controlsLayout.childControlWidth = true;
             controlsLayout.childForceExpandWidth = true;
