@@ -105,9 +105,13 @@ namespace AthmarLabs.VisionCount
             if (FindFirstObjectByType<EventSystem>() == null)
                 new GameObject("EventSystem", typeof(EventSystem), typeof(StandaloneInputModule));
 
-            var canvas = gameObject.GetComponent<Canvas>() ?? gameObject.AddComponent<Canvas>();
+            var canvas = gameObject.GetComponent<Canvas>();
+            if (canvas == null)
+                canvas = gameObject.AddComponent<Canvas>();
             canvas.renderMode = RenderMode.ScreenSpaceOverlay;
-            var scaler = gameObject.GetComponent<CanvasScaler>() ?? gameObject.AddComponent<CanvasScaler>();
+            var scaler = gameObject.GetComponent<CanvasScaler>();
+            if (scaler == null)
+                scaler = gameObject.AddComponent<CanvasScaler>();
             scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
             scaler.referenceResolution = new Vector2(1080f, 1920f);
             scaler.matchWidthOrHeight = 0.5f;
