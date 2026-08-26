@@ -23,7 +23,7 @@ namespace AthmarLabs.VisionCount.Tests
         public void LockedAndUnlockedViewsExposeOnlyRelevantControls()
         {
             var existingEventSystem = Object.FindFirstObjectByType<EventSystem>();
-            _root = new GameObject("Test UI");
+            _root = new GameObject("Test UI", typeof(RectTransform));
             var mainView = _root.AddComponent<VisionCountView>();
             mainView.SendMessage("Awake");
             var view = _root.AddComponent<CustomerAdminView>();

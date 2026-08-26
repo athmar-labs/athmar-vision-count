@@ -36,7 +36,7 @@ namespace AthmarLabs.VisionCount
             if (FindFirstObjectByType<VisionCountApp>() != null)
                 return;
 
-            var root = new GameObject("Athmar Vision Count");
+            var root = new GameObject("Athmar Vision Count", typeof(RectTransform));
             DontDestroyOnLoad(root);
             root.AddComponent<VisionCountView>();
             root.AddComponent<VisionInferenceRunner>();
