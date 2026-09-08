@@ -7,28 +7,32 @@ on:
       - main
     paths:
       - .github/workflows/demo-customer-package.yml
+      - Assets/AthmarVisionCount/Editor/DemoCustomerPackageBuilder.cs
+      - Assets/AthmarVisionCount/Runtime/CustomerPackageManifest.cs
+      - Assets/AthmarVisionCount/Runtime/CustomerPackageStore.cs
+      - Assets/AthmarVisionCount/Runtime/SkuCatalogue.cs
+      - Assets/AthmarVisionCount/Runtime/YoloOutputDecoder.cs
+      - Packages/**
+      - ProjectSettings/**
 
 permissions:
   contents: write
   pages: write
   id-token: write
 
-concurrency:
-  group: demo-customer-package-pages
-  cancel-in-progress: false
-
 env:
   UNITY_VERSION: 6000.3.10f1
   DEMO_PACKAGE_BASE_URL: https://athmar-labs.github.io/athmar-vision-count/demo-customer-v1
 
+concurrency:
+  group: demo-customer-package-pages
+  cancel-in-progress: false
+
 jobs:
-  build-and-publish:
-    name: Build, validate and publish demo package
+  build:
+    name: Build and validate demo package
     runs-on: ubuntu-latest
     timeout-minutes: 120
-    environment:
-      name: github-pages
-      url: https://athmar-labs.github.io/athmar-vision-count/demo-customer-v1/manifest.json
 
     steps:
       - name: Checkout repository
@@ -110,21 +114,62 @@ jobs:
 
       - name: Configure GitHub Pages
         uses: actions/configure-pages@v5
-        with:
-          enablement: true
 
       - name: Upload GitHub Pages artifact
-        uses: actions/upload-pages-artifact@v3
+        uses: actions/upload-pages-artifact@v4
         with:
           path: _site
 
+  deploy:
+    name: Deploy GitHub Pages
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
       - name: Deploy GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
 
+      - name: Verify published manifest
+        shell: bash
+        run: |
+          manifest_url="${DEMO_PACKAGE_BASE_URL}/manifest.json"
+          expected_sha_url="${DEMO_PACKAGE_BASE_URL}/manifest.sha256"
+          for attempt in {1..12}; do
+            if curl --fail --silent --show-error --location "$manifest_url" -o /tmp/manifest.json \
+              && curl --fail --silent --show-error --location "$expected_sha_url" -o /tmp/manifest.sha256; then
+              break
+            fi
+            sleep 10
+          done
+          expected_sha="$(tr -d '[:space:]' < /tmp/manifest.sha256)"
+          actual_sha="$(sha256sum /tmp/manifest.json | awk '{print $1}')"
+          test "$actual_sha" = "$expected_sha"
+          echo "Manifest URL: $manifest_url" >> "$GITHUB_STEP_SUMMARY"
+          echo "Manifest SHA-256: $actual_sha" >> "$GITHUB_STEP_SUMMARY"
+
+  persist-install-values:
+    name: Persist published install values
+    needs: deploy
+    if: success()
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download demo package artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: athmar-demo-customer-package
+          path: Build/DemoCustomerPackage
+
       - name: Persist install values in repository
-        if: success()
-        continue-on-error: true
         shell: bash
         run: |
           mkdir -p docs/generated
