@@ -112,21 +112,31 @@ jobs:
           df -h
       - uses: actions/checkout@v4
 
-      - name: Verify Unity activation secrets
+      - name: Verify Unity CI activation credentials
         shell: bash
         env:
           UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
+          UNITY_SERIAL: ${{ secrets.UNITY_SERIAL }}
           UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
           UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
         run: |
-          test -n "$UNITY_LICENSE"
+          set -euo pipefail
           test -n "$UNITY_EMAIL"
           test -n "$UNITY_PASSWORD"
+          if [ -n "$UNITY_SERIAL" ]; then
+            echo "Unity CI activation mode: professional serial"
+          elif [ -n "$UNITY_LICENSE" ]; then
+            echo "Unity CI activation mode: personal license file"
+          else
+            echo "Missing Unity activation credential. Configure UNITY_SERIAL for Pro/Industry or UNITY_LICENSE for Personal."
+            exit 1
+          fi
 
       - name: Run EditMode tests
         uses: game-ci/unity-test-runner@v4
         env:
-          UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
+          UNITY_SERIAL: ${{ secrets.UNITY_SERIAL }}
+          UNITY_LICENSE: ${{ secrets.UNITY_SERIAL != '' && '' || secrets.UNITY_LICENSE }}
           UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
           UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
         with:
@@ -244,7 +254,8 @@ jobs:
       - name: Build validated generic Android App Bundle
         uses: game-ci/unity-builder@v4
         env:
-          UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
+          UNITY_SERIAL: ${{ secrets.UNITY_SERIAL }}
+          UNITY_LICENSE: ${{ secrets.UNITY_SERIAL != '' && '' || secrets.UNITY_LICENSE }}
           UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
           UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
         with:
