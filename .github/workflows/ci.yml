@@ -252,7 +252,7 @@ jobs:
           PY
 
       - name: Build validated generic Android App Bundle
-        uses: game-ci/unity-builder@v4
+        uses: game-ci/unity-builder@v5
         env:
           UNITY_SERIAL: ${{ secrets.UNITY_SERIAL }}
           UNITY_LICENSE: ${{ secrets.UNITY_SERIAL != '' && '' || secrets.UNITY_LICENSE }}
