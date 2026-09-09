@@ -23,6 +23,7 @@ namespace AthmarLabs.VisionCount
         public event Action DeleteDataRequested;
         public event Action LanguageToggleRequested;
         public event Action<string, int> ManualCountRequested;
+        public event Action AdministrationRequested;
 
         private Font _font;
         private string _language = "en";
@@ -37,6 +38,7 @@ namespace AthmarLabs.VisionCount
         private Text _reviewButtonText;
         private Text _deleteButtonText;
         private Text _languageButtonText;
+        private Text _adminButtonText;
         private GameObject _reviewPanel;
         private Text _reviewTitleText;
         private InputField _operatorInput;
@@ -65,6 +67,7 @@ namespace AthmarLabs.VisionCount
             _reviewButtonText.text = VisionCountLocalization.Text("review", _language);
             _deleteButtonText.text = VisionCountLocalization.Text("delete_data", _language);
             _languageButtonText.text = VisionCountLocalization.Text("language", _language);
+            _adminButtonText.text = VisionCountLocalization.Text("administration", _language);
             _reviewTitleText.text = VisionCountLocalization.Text("review_title", _language);
             _confirmButtonText.text = VisionCountLocalization.Text("confirm_export", _language);
             _cancelButtonText.text = VisionCountLocalization.Text("cancel", _language);
@@ -167,9 +170,13 @@ namespace AthmarLabs.VisionCount
             if (FindObjectOfType<EventSystem>() == null)
                 new GameObject("EventSystem", typeof(EventSystem), typeof(StandaloneInputModule));
 
-            var canvas = gameObject.GetComponent<Canvas>() ?? gameObject.AddComponent<Canvas>();
+            var canvas = gameObject.GetComponent<Canvas>();
+            if (canvas == null)
+                canvas = gameObject.AddComponent<Canvas>();
             canvas.renderMode = RenderMode.ScreenSpaceOverlay;
-            var scaler = gameObject.GetComponent<CanvasScaler>() ?? gameObject.AddComponent<CanvasScaler>();
+            var scaler = gameObject.GetComponent<CanvasScaler>();
+            if (scaler == null)
+                scaler = gameObject.AddComponent<CanvasScaler>();
             scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
             scaler.referenceResolution = new Vector2(1080f, 1920f);
             scaler.matchWidthOrHeight = 0.5f;
@@ -190,23 +197,31 @@ namespace AthmarLabs.VisionCount
             var headerImage = header.gameObject.AddComponent<Image>();
             headerImage.color = new Color(0.08f, 0.12f, 0.17f, 1f);
 
-            _titleText = CreateText("Title", header, 38, FontStyle.Bold, TextAnchor.MiddleLeft);
-            _titleText.rectTransform.anchorMin = new Vector2(0.035f, 0f);
-            _titleText.rectTransform.anchorMax = new Vector2(0.75f, 1f);
+            _titleText = CreateText("Title", header, 34, FontStyle.Bold, TextAnchor.MiddleCenter);
+            _titleText.rectTransform.anchorMin = new Vector2(0.24f, 0f);
+            _titleText.rectTransform.anchorMax = new Vector2(0.76f, 1f);
             _titleText.rectTransform.offsetMin = Vector2.zero;
             _titleText.rectTransform.offsetMax = Vector2.zero;
 
             var languageButton = CreateButton("Language", header, out _languageButtonText);
             var languageRect = languageButton.GetComponent<RectTransform>();
-            languageRect.anchorMin = new Vector2(0.78f, 0.16f);
-            languageRect.anchorMax = new Vector2(0.97f, 0.84f);
+            languageRect.anchorMin = new Vector2(0.78f, 0.14f);
+            languageRect.anchorMax = new Vector2(0.97f, 0.86f);
             languageRect.offsetMin = Vector2.zero;
             languageRect.offsetMax = Vector2.zero;
             languageButton.onClick.AddListener(() => LanguageToggleRequested?.Invoke());
 
+            var adminButton = CreateButton("Admin", header, out _adminButtonText);
+            var adminRect = adminButton.GetComponent<RectTransform>();
+            adminRect.anchorMin = new Vector2(0.03f, 0.14f);
+            adminRect.anchorMax = new Vector2(0.22f, 0.86f);
+            adminRect.offsetMin = Vector2.zero;
+            adminRect.offsetMax = Vector2.zero;
+            adminButton.onClick.AddListener(() => AdministrationRequested?.Invoke());
+
             var cameraPanel = CreateRect("CameraPanel", root);
-            cameraPanel.anchorMin = new Vector2(0.025f, 0.39f);
-            cameraPanel.anchorMax = new Vector2(0.975f, 0.93f);
+            cameraPanel.anchorMin = new Vector2(0.025f, 0.42f);
+            cameraPanel.anchorMax = new Vector2(0.975f, 0.92f);
             cameraPanel.offsetMin = Vector2.zero;
             cameraPanel.offsetMax = Vector2.zero;
             var cameraBackground = cameraPanel.gameObject.AddComponent<Image>();
@@ -236,7 +251,7 @@ namespace AthmarLabs.VisionCount
 
             var bottom = CreateRect("Bottom", root);
             bottom.anchorMin = new Vector2(0.025f, 0.025f);
-            bottom.anchorMax = new Vector2(0.975f, 0.37f);
+            bottom.anchorMax = new Vector2(0.975f, 0.40f);
             bottom.offsetMin = Vector2.zero;
             bottom.offsetMax = Vector2.zero;
             var bottomImage = bottom.gameObject.AddComponent<Image>();
@@ -258,12 +273,12 @@ namespace AthmarLabs.VisionCount
             _privacyText.rectTransform.offsetMax = Vector2.zero;
 
             var controls = CreateRect("Controls", bottom);
-            controls.anchorMin = new Vector2(0.025f, 0.025f);
-            controls.anchorMax = new Vector2(0.975f, 0.155f);
+            controls.anchorMin = new Vector2(0.025f, 0.02f);
+            controls.anchorMax = new Vector2(0.975f, 0.18f);
             controls.offsetMin = Vector2.zero;
             controls.offsetMax = Vector2.zero;
             var controlsLayout = controls.gameObject.AddComponent<HorizontalLayoutGroup>();
-            controlsLayout.spacing = 14f;
+            controlsLayout.spacing = 12f;
             controlsLayout.childAlignment = TextAnchor.MiddleCenter;
             controlsLayout.childControlWidth = true;
             controlsLayout.childForceExpandWidth = true;

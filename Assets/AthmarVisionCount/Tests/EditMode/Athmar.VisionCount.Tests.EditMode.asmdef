@@ -2,7 +2,8 @@
   "name": "Athmar.VisionCount.Tests.EditMode",
   "rootNamespace": "AthmarLabs.VisionCount.Tests",
   "references": [
-    "Athmar.VisionCount.Runtime"
+    "Athmar.VisionCount.Runtime",
+    "UnityEngine.UI"
   ],
   "includePlatforms": [
     "Editor"

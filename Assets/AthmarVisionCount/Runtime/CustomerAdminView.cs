@@ -8,7 +8,6 @@ namespace AthmarLabs.VisionCount
     [DisallowMultipleComponent]
     public sealed class CustomerAdminView : MonoBehaviour
     {
-        public event Action AdministrationRequested;
         public event Action<string> PinSetupRequested;
         public event Action<string> UnlockRequested;
         public event Action<string, string> InstallRequested;
@@ -17,6 +16,7 @@ namespace AthmarLabs.VisionCount
 
         private Font _font;
         private GameObject _panel;
+        private GameObject _authenticationSection;
         private GameObject _packageSection;
         private Text _title;
         private Text _customerText;
@@ -46,6 +46,8 @@ namespace AthmarLabs.VisionCount
             _pinConfigured = pinConfigured;
             _configurationRequired = configurationRequired;
             _panel.SetActive(true);
+            _panel.transform.SetAsLastSibling();
+            _authenticationSection.SetActive(true);
             _packageSection.SetActive(false);
             _pinInput.text = string.Empty;
             _authButtonText.text = pinConfigured
@@ -67,6 +69,8 @@ namespace AthmarLabs.VisionCount
         {
             _hasPreviousPackage = hasPreviousPackage;
             _panel.SetActive(true);
+            _panel.transform.SetAsLastSibling();
+            _authenticationSection.SetActive(false);
             _packageSection.SetActive(true);
             _pinInput.text = string.Empty;
             _title.text = "إدارة العميل والنموذج / Customer & Model Administration";
@@ -104,25 +108,20 @@ namespace AthmarLabs.VisionCount
             if (FindFirstObjectByType<EventSystem>() == null)
                 new GameObject("EventSystem", typeof(EventSystem), typeof(StandaloneInputModule));
 
-            var canvasObject = new GameObject("Customer Administration Canvas", typeof(RectTransform), typeof(Canvas), typeof(CanvasScaler), typeof(GraphicRaycaster));
-            canvasObject.transform.SetParent(transform, false);
-            var canvas = canvasObject.GetComponent<Canvas>();
+            var canvas = gameObject.GetComponent<Canvas>();
+            if (canvas == null)
+                canvas = gameObject.AddComponent<Canvas>();
             canvas.renderMode = RenderMode.ScreenSpaceOverlay;
-            canvas.sortingOrder = 100;
-            var scaler = canvasObject.GetComponent<CanvasScaler>();
+            var scaler = gameObject.GetComponent<CanvasScaler>();
+            if (scaler == null)
+                scaler = gameObject.AddComponent<CanvasScaler>();
             scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
             scaler.referenceResolution = new Vector2(1080f, 1920f);
             scaler.matchWidthOrHeight = 0.5f;
+            if (gameObject.GetComponent<GraphicRaycaster>() == null)
+                gameObject.AddComponent<GraphicRaycaster>();
 
-            var gear = CreateButton("Administration", canvasObject.transform, "إدارة / Admin", out _);
-            var gearRect = gear.GetComponent<RectTransform>();
-            gearRect.anchorMin = new Vector2(0.02f, 0.935f);
-            gearRect.anchorMax = new Vector2(0.23f, 0.985f);
-            gearRect.offsetMin = Vector2.zero;
-            gearRect.offsetMax = Vector2.zero;
-            gear.onClick.AddListener(() => AdministrationRequested?.Invoke());
-
-            var panelRect = CreateRect("AdministrationPanel", canvasObject.transform);
+            var panelRect = CreateRect("AdministrationPanel", transform);
             Stretch(panelRect);
             var background = panelRect.gameObject.AddComponent<Image>();
             background.color = new Color(0.025f, 0.04f, 0.065f, 0.995f);
@@ -139,18 +138,28 @@ namespace AthmarLabs.VisionCount
             _statusText.horizontalOverflow = HorizontalWrapMode.Wrap;
             _statusText.verticalOverflow = VerticalWrapMode.Truncate;
 
-            _pinInput = CreateInputField("AdminPin", panelRect, "رمز المدير / Administrator PIN");
-            Place(_pinInput.GetComponent<RectTransform>(), 0.10f, 0.62f, 0.90f, 0.69f);
+            var authenticationRect = CreateRect("AuthenticationSection", panelRect);
+            Place(authenticationRect, 0.08f, 0.43f, 0.92f, 0.71f);
+            var authenticationBackground = authenticationRect.gameObject.AddComponent<Image>();
+            authenticationBackground.color = new Color(0.07f, 0.10f, 0.14f, 1f);
+            _authenticationSection = authenticationRect.gameObject;
+
+            var pinLabel = CreateText("AdminPinLabel", authenticationRect, 27, FontStyle.Bold, TextAnchor.MiddleCenter);
+            pinLabel.text = "رمز المدير\nAdministrator PIN";
+            Place(pinLabel.rectTransform, 0.05f, 0.73f, 0.95f, 0.96f);
+
+            _pinInput = CreateInputField("AdminPin", authenticationRect, "أدخل 6–12 رقمًا / Enter 6–12 digits");
+            Place(_pinInput.GetComponent<RectTransform>(), 0.08f, 0.40f, 0.92f, 0.69f);
             _pinInput.contentType = InputField.ContentType.Pin;
             _pinInput.keyboardType = TouchScreenKeyboardType.NumberPad;
             _pinInput.characterLimit = 12;
 
-            _authButton = CreateButton("Authenticate", panelRect, string.Empty, out _authButtonText);
-            Place(_authButton.GetComponent<RectTransform>(), 0.20f, 0.53f, 0.80f, 0.60f);
+            _authButton = CreateButton("Authenticate", authenticationRect, string.Empty, out _authButtonText);
+            Place(_authButton.GetComponent<RectTransform>(), 0.08f, 0.07f, 0.92f, 0.33f);
             _authButton.onClick.AddListener(HandleAuthentication);
 
             var packageRect = CreateRect("PackageSection", panelRect);
-            Place(packageRect, 0.05f, 0.16f, 0.95f, 0.51f);
+            Place(packageRect, 0.05f, 0.18f, 0.95f, 0.70f);
             var packageBackground = packageRect.gameObject.AddComponent<Image>();
             packageBackground.color = new Color(0.07f, 0.10f, 0.14f, 1f);
             _packageSection = packageRect.gameObject;

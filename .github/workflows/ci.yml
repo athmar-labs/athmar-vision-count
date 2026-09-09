@@ -26,6 +26,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
+      - name: Cleanup disk for Unity
+        run: |
+          sudo rm -rf /tmp/* /var/lib/apt/lists/* /opt/unity/Editor/Data/Tools/libRL* 2>/dev/null || true
+          docker system prune -a --volumes -f || true
+          df -h
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
@@ -100,6 +105,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 35
     steps:
+      - name: Cleanup disk for Unity
+        run: |
+          sudo rm -rf /tmp/* /var/lib/apt/lists/* /opt/unity/Editor/Data/Tools/libRL* 2>/dev/null || true
+          docker system prune -a --volumes -f || true
+          df -h
       - uses: actions/checkout@v4
 
       - name: Reclaim runner disk space for Unity test image
@@ -137,17 +147,27 @@ jobs:
         shell: bash
         env:
           UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
+          UNITY_SERIAL: ${{ secrets.UNITY_SERIAL }}
           UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
           UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
         run: |
-          test -n "$UNITY_LICENSE"
+          set -euo pipefail
           test -n "$UNITY_EMAIL"
           test -n "$UNITY_PASSWORD"
+          if [ -n "$UNITY_SERIAL" ]; then
+            echo "Unity CI activation mode: professional serial"
+          elif [ -n "$UNITY_LICENSE" ]; then
+            echo "Unity CI activation mode: personal license file"
+          else
+            echo "Missing Unity activation credential. Configure UNITY_SERIAL for Pro/Industry or UNITY_LICENSE for Personal."
+            exit 1
+          fi
 
       - name: Run EditMode tests
         uses: game-ci/unity-test-runner@v4
         env:
-          UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
+          UNITY_SERIAL: ${{ secrets.UNITY_SERIAL }}
+          UNITY_LICENSE: ${{ secrets.UNITY_SERIAL != '' && '' || secrets.UNITY_LICENSE }}
           UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
           UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
         with:
@@ -176,6 +196,11 @@ jobs:
     timeout-minutes: 180
     environment: production
     steps:
+      - name: Cleanup disk for Unity
+        run: |
+          sudo rm -rf /tmp/* /var/lib/apt/lists/* /opt/unity/Editor/Data/Tools/libRL* 2>/dev/null || true
+          docker system prune -a --volumes -f || true
+          df -h
       - uses: actions/checkout@v4
 
       - name: Reclaim runner disk space for Unity Android image
@@ -260,7 +285,8 @@ jobs:
       - name: Build validated generic Android App Bundle
         uses: game-ci/unity-builder@v4
         env:
-          UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
+          UNITY_SERIAL: ${{ secrets.UNITY_SERIAL }}
+          UNITY_LICENSE: ${{ secrets.UNITY_SERIAL != '' && '' || secrets.UNITY_LICENSE }}
           UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
           UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
         with:

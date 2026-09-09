@@ -23,6 +23,7 @@ namespace AthmarLabs.VisionCount
         private bool _running;
         private bool _paused;
         private double _nextInferenceAt;
+        private string _activeInferenceStage = "idle";
 
         public Texture CameraTexture => _cameraTexture;
         public bool IsReady => _running && _cameraTexture != null && _cameraTexture.isPlaying && _worker != null;
@@ -47,6 +48,7 @@ namespace AthmarLabs.VisionCount
             _config = config;
             _catalogue = catalogue;
             _paused = startPaused;
+            _activeInferenceStage = "initializing";
             StartCoroutine(StartPipeline());
         }
 
@@ -91,6 +93,7 @@ namespace AthmarLabs.VisionCount
             _model = null;
             _config = null;
             _catalogue = null;
+            _activeInferenceStage = "stopped";
         }
 
         private IEnumerator StartPipeline()
@@ -107,12 +110,14 @@ namespace AthmarLabs.VisionCount
 
             try
             {
+                _activeInferenceStage = "create_resources";
                 CreateInferenceResources();
+                _activeInferenceStage = "start_camera";
                 StartRearCamera();
             }
             catch (Exception exception)
             {
-                ReportFault("Unable to initialize on-device inference: " + exception.Message);
+                ReportDetailedFault("Unable to initialize on-device inference", _activeInferenceStage, exception);
                 StopPipeline();
                 yield break;
             }
@@ -129,6 +134,7 @@ namespace AthmarLabs.VisionCount
             }
 
             _running = true;
+            _activeInferenceStage = "ready";
             StatusChanged?.Invoke(_paused ? "paused" : "scanning");
             _inferenceLoop = RunInferenceLoop();
             _loopStarted = true;
@@ -136,22 +142,33 @@ namespace AthmarLabs.VisionCount
 
         private void CreateInferenceResources()
         {
+            EnsureConfigured();
+
             _model = !string.IsNullOrWhiteSpace(_config.ModelFilePath)
                 ? ModelLoader.Load(_config.ModelFilePath)
                 : ModelLoader.Load(_config.ModelAsset);
+            if (_model == null)
+                throw new InvalidOperationException("ModelLoader returned no model.");
+
             var backend = _config.PreferGpu && SystemInfo.supportsComputeShaders
                 ? BackendType.GPUCompute
                 : BackendType.CPU;
             _worker = new Worker(_model, backend);
+            if (_worker == null)
+                throw new InvalidOperationException("Unable to create the inference worker.");
 
             var shape = _config.InputLayout == ModelInputLayout.Nhwc
                 ? new TensorShape(1, _config.ModelInputHeight, _config.ModelInputWidth, 3)
                 : new TensorShape(1, 3, _config.ModelInputHeight, _config.ModelInputWidth);
             _inputTensor = new Tensor<float>(shape);
+            if (_inputTensor == null)
+                throw new InvalidOperationException("Unable to allocate the input tensor.");
         }
 
         private void StartRearCamera()
         {
+            EnsureConfigured();
+
             var devices = WebCamTexture.devices;
             if (devices == null || devices.Length == 0)
                 throw new InvalidOperationException("No camera is available on this device.");
@@ -181,6 +198,7 @@ namespace AthmarLabs.VisionCount
                 {
                     if (!_paused && _cameraTexture != null && _cameraTexture.didUpdateThisFrame && Time.realtimeSinceStartupAsDouble >= _nextInferenceAt)
                     {
+                        EnsureRuntimeState();
                         _nextInferenceAt = Time.realtimeSinceStartupAsDouble + _config.InferenceIntervalSeconds;
                         await RunSingleInference();
                     }
@@ -195,7 +213,7 @@ namespace AthmarLabs.VisionCount
             catch (Exception exception)
             {
                 _running = false;
-                ReportFault("On-device inference stopped: " + exception.Message);
+                ReportDetailedFault("On-device inference stopped", _activeInferenceStage, exception);
             }
             finally
             {
@@ -205,17 +223,32 @@ namespace AthmarLabs.VisionCount
 
         private async Awaitable RunSingleInference()
         {
+            EnsureRuntimeState();
+
+            _activeInferenceStage = "prepare_input_transform";
             var transform = new TextureTransform();
             if (_config.InputLayout == ModelInputLayout.Nhwc)
                 transform.SetTensorLayout(TensorLayout.NHWC);
 
+            _activeInferenceStage = "texture_to_tensor";
             TextureConverter.ToTensor(_cameraTexture, _inputTensor, transform);
+
+            _activeInferenceStage = "schedule_worker";
             _worker.Schedule(_inputTensor);
 
-            if (!(_worker.PeekOutput(_config.OutputTensorIndex) is Tensor<float> outputOnDevice))
+            _activeInferenceStage = "peek_output";
+            var rawOutput = _worker.PeekOutput(_config.OutputTensorIndex);
+            if (rawOutput == null)
+                throw new InvalidOperationException($"Model output at index {_config.OutputTensorIndex} was null.");
+            if (!(rawOutput is Tensor<float> outputOnDevice))
                 throw new InvalidOperationException("The configured model output is not a float tensor.");
 
+            _activeInferenceStage = "readback_output";
             using var output = await outputOnDevice.ReadbackAndCloneAsync();
+            if (output == null)
+                throw new InvalidOperationException("Output readback returned no tensor.");
+
+            _activeInferenceStage = "validate_output_shape";
             if (output.shape.rank != 2 && output.shape.rank != 3)
                 throw new InvalidOperationException($"Unsupported model output rank {output.shape.rank}; expected rank 2 or 3.");
             if (output.shape.rank == 3 && output.shape[0] != 1)
@@ -223,8 +256,15 @@ namespace AthmarLabs.VisionCount
 
             var dimensionA = output.shape[-2];
             var dimensionB = output.shape[-1];
+
+            _activeInferenceStage = "download_output";
+            var outputValues = output.DownloadToArray();
+            if (outputValues == null)
+                throw new InvalidOperationException("Model output download returned no data.");
+
+            _activeInferenceStage = "decode_yolo_output";
             var detections = YoloOutputDecoder.Decode(
-                output.DownloadToArray(),
+                outputValues,
                 dimensionA,
                 dimensionB,
                 _config.OutputTensorLayout,
@@ -236,8 +276,48 @@ namespace AthmarLabs.VisionCount
                 _config.NonMaxSuppressionIouThreshold,
                 _config.MaxDetections,
                 _catalogue);
+            if (detections == null)
+                throw new InvalidOperationException("The YOLO decoder returned no detection collection.");
 
+            _activeInferenceStage = "publish_detections";
             DetectionsReady?.Invoke(detections);
+            _activeInferenceStage = "idle";
+        }
+
+        private void EnsureConfigured()
+        {
+            if (_config == null)
+                throw new InvalidOperationException("Inference configuration is unavailable.");
+            if (_catalogue == null)
+                throw new InvalidOperationException("SKU catalogue is unavailable.");
+            if (_config.ModelInputWidth <= 0 || _config.ModelInputHeight <= 0)
+                throw new InvalidOperationException("Model input dimensions must be greater than zero.");
+        }
+
+        private void EnsureRuntimeState()
+        {
+            _activeInferenceStage = "preflight";
+            EnsureConfigured();
+
+            if (_cameraTexture == null)
+                throw new InvalidOperationException("Camera texture is unavailable.");
+            if (!_cameraTexture.isPlaying)
+                throw new InvalidOperationException("Camera texture is not playing.");
+            if (_worker == null)
+                throw new InvalidOperationException("Inference worker is unavailable.");
+            if (_inputTensor == null)
+                throw new InvalidOperationException("Input tensor is unavailable.");
+        }
+
+        private void ReportDetailedFault(string prefix, string stage, Exception exception)
+        {
+            var safeStage = string.IsNullOrWhiteSpace(stage) ? "unknown" : stage;
+            var safeException = exception ?? new InvalidOperationException("Unknown inference failure.");
+            var userMessage = $"{prefix} [{safeStage}]: {safeException.GetType().Name}: {safeException.Message}";
+
+            _paused = true;
+            Faulted?.Invoke(userMessage);
+            Debug.LogError(userMessage + "\n" + safeException);
         }
 
         private void ReportFault(string message)

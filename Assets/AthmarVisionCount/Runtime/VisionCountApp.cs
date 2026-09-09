@@ -37,7 +37,7 @@ namespace AthmarLabs.VisionCount
             if (FindFirstObjectByType<VisionCountApp>() != null)
                 return;
 
-            var root = new GameObject("Athmar Vision Count");
+            var root = new GameObject("Athmar Vision Count", typeof(RectTransform));
             DontDestroyOnLoad(root);
             root.AddComponent<VisionCountView>();
             root.AddComponent<VisionInferenceRunner>();
@@ -168,7 +168,7 @@ namespace AthmarLabs.VisionCount
             _view.DeleteDataRequested += DeleteAllData;
             _view.LanguageToggleRequested += ToggleLanguage;
             _view.ManualCountRequested += SetManualCount;
-            _adminView.AdministrationRequested += OpenAdministration;
+            _view.AdministrationRequested += OpenAdministration;
             _adminView.PinSetupRequested += SetupAdminPin;
             _adminView.UnlockRequested += UnlockAdministration;
             _adminView.InstallRequested += InstallCustomerPackage;
@@ -197,11 +197,11 @@ namespace AthmarLabs.VisionCount
                 _view.DeleteDataRequested -= DeleteAllData;
                 _view.LanguageToggleRequested -= ToggleLanguage;
                 _view.ManualCountRequested -= SetManualCount;
+                _view.AdministrationRequested -= OpenAdministration;
             }
 
             if (_adminView != null)
             {
-                _adminView.AdministrationRequested -= OpenAdministration;
                 _adminView.PinSetupRequested -= SetupAdminPin;
                 _adminView.UnlockRequested -= UnlockAdministration;
                 _adminView.InstallRequested -= InstallCustomerPackage;

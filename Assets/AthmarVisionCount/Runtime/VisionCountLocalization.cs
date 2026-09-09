@@ -22,6 +22,7 @@ namespace AthmarLabs.VisionCount
                 case "cancel": return arabic ? "إلغاء" : "Cancel";
                 case "delete_data": return arabic ? "حذف البيانات المحلية" : "Delete Local Data";
                 case "language": return arabic ? "English" : "العربية";
+                case "administration": return arabic ? "الإدارة" : "Admin";
                 case "operator": return arabic ? "مرجع الموظف" : "Operator reference";
                 case "location": return arabic ? "الموقع / الرف" : "Location / shelf";
                 case "proposed": return arabic ? "المقترح" : "Proposed";
