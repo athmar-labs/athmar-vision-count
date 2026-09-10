@@ -38,11 +38,13 @@ namespace AthmarLabs.VisionCount
 
         private void Awake()
         {
-            BuildInterface();
+            EnsureInterfaceBuilt();
         }
 
         public void ShowLocked(bool pinConfigured, bool configurationRequired)
         {
+            EnsureInterfaceBuilt();
+
             _pinConfigured = pinConfigured;
             _configurationRequired = configurationRequired;
             _panel.SetActive(true);
@@ -67,6 +69,8 @@ namespace AthmarLabs.VisionCount
 
         public void ShowUnlocked(string customerCode, bool hasPreviousPackage)
         {
+            EnsureInterfaceBuilt();
+
             _hasPreviousPackage = hasPreviousPackage;
             _panel.SetActive(true);
             _panel.transform.SetAsLastSibling();
@@ -100,6 +104,14 @@ namespace AthmarLabs.VisionCount
         public void Hide()
         {
             _panel.SetActive(false);
+        }
+
+        private void EnsureInterfaceBuilt()
+        {
+            if (_panel != null)
+                return;
+
+            BuildInterface();
         }
 
         private void BuildInterface()
