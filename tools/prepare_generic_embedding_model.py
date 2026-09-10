@@ -18,9 +18,9 @@ import json
 import pathlib
 import urllib.request
 
+import numpy as np
 import onnx
 from onnx import TensorProto, helper, numpy_helper, shape_inference
-import numpy as np
 
 SOURCE_COMMIT = "1d25e5d466f1df28e8e530e747b8d75b76a36735"
 SOURCE_URL = (
@@ -31,6 +31,7 @@ SOURCE_SHA256 = "0593e80f3671dee6369804a9440c6fa2fd5337c3e524dde3e11f2376a8b8fcf
 MODEL_ID = "timm/mobilenetv3_small_075.lamb_in1k"
 MODEL_REVISION = "fa65a043c25690a5779ff856052a5ae55ec03eda"
 FEATURE_DIMENSION = 1024
+CLASS_COUNT = 1000
 INPUT_SIZE = 224
 OUTPUT_DIR = pathlib.Path("Assets/Generated/Resources")
 OUTPUT_PATH = OUTPUT_DIR / "AthmarGenericEmbedding.onnx"
@@ -61,24 +62,61 @@ def download_verified() -> None:
 
 
 def find_preclassifier_feature(model: onnx.ModelProto) -> str:
-    if len(model.graph.output) != 1:
-        raise SystemExit(f"Expected one classifier output, found {len(model.graph.output)}")
+    """Find the input to the 1000-class classifier, independent of graph output count."""
+    initializer_shapes = {
+        value.name: tuple(value.dims)
+        for value in model.graph.initializer
+    }
 
-    wanted = model.graph.output[0].name
-    producers = {output: node for node in model.graph.node for output in node.output if output}
-    visited: set[str] = set()
-    while wanted in producers and wanted not in visited:
-        visited.add(wanted)
-        node = producers[wanted]
-        if node.op_type in {"Gemm", "MatMul"}:
-            if not node.input:
-                break
-            return node.input[0]
-        if node.op_type in {"Softmax", "Identity", "Cast"} and node.input:
-            wanted = node.input[0]
+    strong_candidates = []
+    all_linear_candidates = []
+    for node in model.graph.node:
+        if node.op_type not in {"Gemm", "MatMul"} or len(node.input) < 2:
             continue
-        break
-    raise SystemExit("Could not identify the final classifier Gemm/MatMul and its pre-classifier feature tensor")
+        all_linear_candidates.append(node)
+        weight_shape = initializer_shapes.get(node.input[1], ())
+        if len(weight_shape) >= 2 and {
+            weight_shape[-2], weight_shape[-1]
+        } == {FEATURE_DIMENSION, CLASS_COUNT}:
+            strong_candidates.append(node)
+
+    if strong_candidates:
+        classifier = strong_candidates[-1]
+        print(
+            "Selected classifier by weight shape:",
+            classifier.name or classifier.op_type,
+            initializer_shapes.get(classifier.input[1]),
+        )
+        return classifier.input[0]
+
+    # Fallback for exporters that hide/transmute initializer shapes: traverse every declared
+    # output backwards through pass-through operators until a final linear classifier appears.
+    producers = {
+        output: node
+        for node in model.graph.node
+        for output in node.output
+        if output
+    }
+    for graph_output in model.graph.output:
+        wanted = graph_output.name
+        visited: set[str] = set()
+        while wanted in producers and wanted not in visited:
+            visited.add(wanted)
+            node = producers[wanted]
+            if node.op_type in {"Gemm", "MatMul"} and node.input:
+                print("Selected classifier by output traversal:", node.name or node.op_type)
+                return node.input[0]
+            if node.op_type in {"Softmax", "Identity", "Cast", "Squeeze", "Flatten"} and node.input:
+                wanted = node.input[0]
+                continue
+            break
+
+    output_names = [value.name for value in model.graph.output]
+    candidate_names = [node.name or node.op_type for node in all_linear_candidates]
+    raise SystemExit(
+        "Could not identify the final 1000-class classifier. "
+        f"graph_outputs={output_names}, linear_candidates={candidate_names}"
+    )
 
 
 def replace_input_with_embedded_preprocessing(model: onnx.ModelProto) -> None:
@@ -117,9 +155,25 @@ def replace_input_with_embedded_preprocessing(model: onnx.ModelProto) -> None:
         numpy_helper.from_array(std, name="athmar_imagenet_std"),
     ])
     preprocessing = [
-        helper.make_node("Transpose", [new_input_name], [transpose_name], perm=[0, 3, 1, 2], name="athmar_nhwc_to_nchw"),
-        helper.make_node("Sub", [transpose_name, "athmar_imagenet_mean"], [centered_name], name="athmar_subtract_mean"),
-        helper.make_node("Div", [centered_name, "athmar_imagenet_std"], [normalized_name], name="athmar_divide_std"),
+        helper.make_node(
+            "Transpose",
+            [new_input_name],
+            [transpose_name],
+            perm=[0, 3, 1, 2],
+            name="athmar_nhwc_to_nchw",
+        ),
+        helper.make_node(
+            "Sub",
+            [transpose_name, "athmar_imagenet_mean"],
+            [centered_name],
+            name="athmar_subtract_mean",
+        ),
+        helper.make_node(
+            "Div",
+            [centered_name, "athmar_imagenet_std"],
+            [normalized_name],
+            name="athmar_divide_std",
+        ),
     ]
     original_nodes = list(model.graph.node)
     del model.graph.node[:]
@@ -137,8 +191,10 @@ def main() -> None:
     download_verified()
     model = onnx.load(str(DOWNLOAD_PATH))
     onnx.checker.check_model(model)
+    print("Upstream outputs:", [value.name for value in model.graph.output])
 
     feature_name = find_preclassifier_feature(model)
+    print("Pre-classifier feature tensor:", feature_name)
     replace_input_with_embedded_preprocessing(model)
     expose_embedding_output(model, feature_name)
 
@@ -167,11 +223,21 @@ def main() -> None:
         "upstream_export_commit": SOURCE_COMMIT,
         "upstream_sha256": SOURCE_SHA256,
         "prepared_sha256": prepared_sha,
-        "input": {"layout": "NHWC", "shape": [1, INPUT_SIZE, INPUT_SIZE, 3], "range": "0..1 RGB"},
-        "output": {"shape": [1, FEATURE_DIMENSION], "semantic": "pre-classifier learned feature vector"},
+        "input": {
+            "layout": "NHWC",
+            "shape": [1, INPUT_SIZE, INPUT_SIZE, 3],
+            "range": "0..1 RGB",
+        },
+        "output": {
+            "shape": [1, FEATURE_DIMENSION],
+            "semantic": "pre-classifier learned feature vector",
+        },
         "note": "Technical provenance only; commercial/legal approval remains an explicit release gate.",
     }
-    PROVENANCE_PATH.write_text(json.dumps(provenance, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    PROVENANCE_PATH.write_text(
+        json.dumps(provenance, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
     print(f"Prepared {OUTPUT_PATH} sha256={prepared_sha}")
 
 
