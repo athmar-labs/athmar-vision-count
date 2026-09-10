@@ -58,8 +58,11 @@ jobs:
               pathlib.Path("Assets/AthmarVisionCount/Runtime/AdminPinStore.cs"),
               pathlib.Path("Assets/AthmarVisionCount/Runtime/YoloOutputDecoder.cs"),
               pathlib.Path("Assets/AthmarVisionCount/Runtime/SkuCatalogue.cs"),
+              pathlib.Path("Assets/AthmarVisionCount/Runtime/SentisProductEmbeddingExtractor.cs"),
               pathlib.Path("Assets/AthmarVisionCount/Editor/ProjectBootstrapper.cs"),
               pathlib.Path("Assets/AthmarVisionCount/Editor/ProductionReadinessValidator.cs"),
+              pathlib.Path("Assets/AthmarVisionCount/Tests/EditMode/Athmar.VisionCount.Tests.EditMode.asmdef"),
+              pathlib.Path("tools/prepare_generic_embedding_model.py"),
               pathlib.Path("SECURITY.md"),
               pathlib.Path("PRIVACY.md"),
           ]
@@ -213,6 +216,24 @@ jobs:
           df -h
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
+      - name: Install pinned generic embedding preparation dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --disable-pip-version-check \
+            numpy==1.26.4 \
+            protobuf==5.28.3 \
+            onnx==1.17.0
+
+      - name: Prepare and verify generic embedding model for release
+        shell: bash
+        run: |
+          set -euo pipefail
+          python tools/prepare_generic_embedding_model.py
+          test -s Assets/Generated/Resources/AthmarGenericEmbedding.onnx
+          test -s Assets/Generated/Resources/AthmarGenericEmbedding.provenance.json
+          cat Assets/Generated/Resources/AthmarGenericEmbedding.provenance.json
+
       - name: Reclaim runner disk space for Unity Android image
         shell: bash
         run: |
@@ -323,6 +344,7 @@ jobs:
           path: |
             Build/AthmarVisionCount.aab
             Build/AthmarVisionCount.aab.sha256
+            Assets/Generated/Resources/AthmarGenericEmbedding.provenance.json
           if-no-files-found: error
           retention-days: 30
 
