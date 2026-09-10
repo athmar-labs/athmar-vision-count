@@ -19,6 +19,9 @@ namespace AthmarLabs.VisionCount
         private Tensor<float> _inputTensor;
         private WebCamTexture _cameraTexture;
         private Awaitable _inferenceLoop;
+        private BackendType _backend;
+        private float[] _cpuInputBuffer;
+        private Color32[] _cpuCameraPixels;
         private bool _loopStarted;
         private bool _running;
         private bool _paused;
@@ -91,6 +94,8 @@ namespace AthmarLabs.VisionCount
             _worker?.Dispose();
             _worker = null;
             _model = null;
+            _cpuInputBuffer = null;
+            _cpuCameraPixels = null;
             _config = null;
             _catalogue = null;
             _activeInferenceStage = "stopped";
@@ -150,10 +155,10 @@ namespace AthmarLabs.VisionCount
             if (_model == null)
                 throw new InvalidOperationException("ModelLoader returned no model.");
 
-            var backend = _config.PreferGpu && SystemInfo.supportsComputeShaders
+            _backend = _config.PreferGpu && SystemInfo.supportsComputeShaders
                 ? BackendType.GPUCompute
                 : BackendType.CPU;
-            _worker = new Worker(_model, backend);
+            _worker = new Worker(_model, _backend);
             if (_worker == null)
                 throw new InvalidOperationException("Unable to create the inference worker.");
 
@@ -163,6 +168,9 @@ namespace AthmarLabs.VisionCount
             _inputTensor = new Tensor<float>(shape);
             if (_inputTensor == null)
                 throw new InvalidOperationException("Unable to allocate the input tensor.");
+
+            if (_backend == BackendType.CPU)
+                _cpuInputBuffer = new float[checked(_config.ModelInputWidth * _config.ModelInputHeight * 3)];
         }
 
         private void StartRearCamera()
@@ -225,13 +233,21 @@ namespace AthmarLabs.VisionCount
         {
             EnsureRuntimeState();
 
-            _activeInferenceStage = "prepare_input_transform";
-            var transform = new TextureTransform();
-            if (_config.InputLayout == ModelInputLayout.Nhwc)
-                transform.SetTensorLayout(TensorLayout.NHWC);
+            if (_backend == BackendType.CPU)
+            {
+                _activeInferenceStage = "camera_to_cpu_tensor";
+                FillCpuInputTensor();
+            }
+            else
+            {
+                _activeInferenceStage = "prepare_input_transform";
+                var transform = new TextureTransform();
+                if (_config.InputLayout == ModelInputLayout.Nhwc)
+                    transform.SetTensorLayout(TensorLayout.NHWC);
 
-            _activeInferenceStage = "texture_to_tensor";
-            TextureConverter.ToTensor(_cameraTexture, _inputTensor, transform);
+                _activeInferenceStage = "texture_to_tensor";
+                TextureConverter.ToTensor(_cameraTexture, _inputTensor, transform);
+            }
 
             _activeInferenceStage = "schedule_worker";
             _worker.Schedule(_inputTensor);
@@ -282,6 +298,35 @@ namespace AthmarLabs.VisionCount
             _activeInferenceStage = "publish_detections";
             DetectionsReady?.Invoke(detections);
             _activeInferenceStage = "idle";
+        }
+
+        private void FillCpuInputTensor()
+        {
+            if (_cpuInputBuffer == null)
+                throw new InvalidOperationException("CPU inference input buffer is unavailable.");
+
+            var sourceWidth = _cameraTexture.width;
+            var sourceHeight = _cameraTexture.height;
+            if (sourceWidth <= 16 || sourceHeight <= 16)
+                throw new InvalidOperationException("The camera frame is too small for CPU inference.");
+
+            var requiredPixels = checked(sourceWidth * sourceHeight);
+            if (_cpuCameraPixels == null || _cpuCameraPixels.Length != requiredPixels)
+                _cpuCameraPixels = new Color32[requiredPixels];
+
+            _cpuCameraPixels = _cameraTexture.GetPixels32(_cpuCameraPixels);
+            if (_cpuCameraPixels == null || _cpuCameraPixels.Length != requiredPixels)
+                throw new InvalidOperationException("Unable to read the current camera frame for CPU inference.");
+
+            CpuRgbTensorWriter.ResizeRgb01(
+                _cpuCameraPixels,
+                sourceWidth,
+                sourceHeight,
+                _config.ModelInputWidth,
+                _config.ModelInputHeight,
+                _config.InputLayout,
+                _cpuInputBuffer);
+            _inputTensor.Upload(_cpuInputBuffer);
         }
 
         private void EnsureConfigured()
