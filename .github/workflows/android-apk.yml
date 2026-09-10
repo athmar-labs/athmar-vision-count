@@ -2,6 +2,14 @@ name: Build Signed Android APK
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - real-yolo-sentis-smoke
+    paths:
+      - ".github/workflows/android-apk.yml"
+      - "Assets/**"
+      - "Packages/**"
+      - "ProjectSettings/**"
 
 permissions:
   contents: read
@@ -18,7 +26,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
 
       - name: Reclaim runner disk space for Unity Android image
         shell: bash
@@ -55,6 +63,7 @@ jobs:
         shell: bash
         env:
           UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
+          UNITY_SERIAL: ${{ secrets.UNITY_SERIAL }}
           UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
           UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
@@ -63,9 +72,16 @@ jobs:
           ANDROID_KEY_ALIAS_PASS: ${{ secrets.ANDROID_KEY_ALIAS_PASS }}
         run: |
           set -euo pipefail
-          test -n "$UNITY_LICENSE"
           test -n "$UNITY_EMAIL"
           test -n "$UNITY_PASSWORD"
+          if [ -n "$UNITY_SERIAL" ]; then
+            echo "Unity CI activation mode: professional serial"
+          elif [ -n "$UNITY_LICENSE" ]; then
+            echo "Unity CI activation mode: personal license file"
+          else
+            echo "Missing Unity activation credential."
+            exit 1
+          fi
           test -n "$ANDROID_KEYSTORE_BASE64"
           test -n "$ANDROID_KEYSTORE_PASS"
           test -n "$ANDROID_KEY_ALIAS"
@@ -106,9 +122,10 @@ jobs:
           PY
 
       - name: Build validated signed Android APK
-        uses: game-ci/unity-builder@v4
+        uses: game-ci/unity-builder@4423ee75828dff56037d1d1cfdac6b68e3a6ba00
         env:
-          UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
+          UNITY_SERIAL: ${{ secrets.UNITY_SERIAL }}
+          UNITY_LICENSE: ${{ secrets.UNITY_SERIAL != '' && '' || secrets.UNITY_LICENSE }}
           UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
           UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
         with:
@@ -129,14 +146,14 @@ jobs:
           runAsHostUser: true
 
       - name: Upload signed APK
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: athmar-vision-count-android-apk
+          name: athmar-current-main-android-apk
           path: |
             Build/AthmarVisionCount.apk
             Build/AthmarVisionCount.apk.sha256
           if-no-files-found: error
-          retention-days: 30
+          retention-days: 14
 
       - name: Remove signing and generated material
         if: always()
