@@ -10,6 +10,7 @@ namespace AthmarLabs.VisionCount
     {
         private const string ConfigResourceName = "AthmarVisionCountConfig";
         private const double DeleteConfirmationWindowSeconds = 5d;
+        private const float RetentionIntervalSeconds = 6f * 60f * 60f;
 
         private VisionCountView _view;
         private VisionInferenceRunner _inference;
@@ -25,9 +26,9 @@ namespace AthmarLabs.VisionCount
         private ExportFileService _exports;
         private ScanSessionRecord _reviewSession;
         private IReadOnlyDictionary<string, int> _latestCounts = new Dictionary<string, int>();
+        private readonly AdminSession _adminSession = new AdminSession();
         private bool _reviewing;
         private bool _initialized;
-        private readonly AdminSession _adminSession = new AdminSession();
         private double _deleteConfirmationExpiresAt;
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
@@ -60,6 +61,7 @@ namespace AthmarLabs.VisionCount
         private void Start()
         {
             InitializeApplication();
+            InvokeRepeating(nameof(ApplyActiveRetention), RetentionIntervalSeconds, RetentionIntervalSeconds);
         }
 
         private void Update()
@@ -67,6 +69,7 @@ namespace AthmarLabs.VisionCount
             if (_inference == null || _view == null)
                 return;
 
+            RelockExpiredAdminSession();
             _view.SetCamera(_inference.CameraTexture, _inference.VideoRotationAngle, _inference.VideoVerticallyMirrored);
         }
 
@@ -108,7 +111,7 @@ namespace AthmarLabs.VisionCount
             EnterConfigurationRequiredState(packageError);
         }
 
-        private void ActivateConfiguration(IVisionCountConfiguration config, SkuCatalogue catalogue)
+        private void ActivateConfiguration(IVisionCountConfiguration config, SkuCatalogue catalogue, bool startPaused = false)
         {
             if (config == null)
                 throw new ArgumentNullException(nameof(config));
@@ -134,9 +137,10 @@ namespace AthmarLabs.VisionCount
             _view.SetLanguage(config.DefaultLanguage);
             _view.ShowCounts(_latestCounts, _catalogue);
             _view.ShowDetections(Array.Empty<Detection>(), _catalogue);
-            _inference.Initialize(config, _catalogue);
+            _inference.Initialize(config, _catalogue, startPaused);
             _initialized = true;
             _adminSession.End();
+            ApplyActiveRetention();
         }
 
         private void EnterConfigurationRequiredState(string error)
@@ -250,7 +254,7 @@ namespace AthmarLabs.VisionCount
 
         private void InstallCustomerPackage(string manifestUrl, string manifestSha256)
         {
-            if (!_adminSession.IsActive)
+            if (!_adminSession.IsActive(Time.realtimeSinceStartupAsDouble))
             {
                 _adminView.SetStatus("يجب فتح لوحة الإدارة أولًا / Unlock administration first", true);
                 return;
@@ -270,16 +274,15 @@ namespace AthmarLabs.VisionCount
 
         private void RollbackCustomerPackage()
         {
-            if (!_adminSession.IsActive)
+            if (!_adminSession.IsActive(Time.realtimeSinceStartupAsDouble))
                 return;
 
             try
             {
                 _adminView.SetBusy(true);
                 var snapshot = _packageStore.Rollback();
-                ActivateConfiguration(snapshot.Configuration, snapshot.Catalogue);
-                _adminSession.Start(Time.realtimeSinceStartupAsDouble);
-                _adminView.ShowUnlocked(snapshot.Configuration.CustomerCode, _packageStore.HasPreviousPackage);
+                ActivateConfiguration(snapshot.Configuration, snapshot.Catalogue, startPaused: true);
+                _adminView.ShowLocked(_pinStore.HasPin, false);
                 _adminView.SetStatus("تم الرجوع إلى حزمة العميل السابقة / Previous package restored");
             }
             catch (Exception exception)
@@ -307,9 +310,8 @@ namespace AthmarLabs.VisionCount
         {
             try
             {
-                ActivateConfiguration(snapshot.Configuration, snapshot.Catalogue);
-                _adminSession.Start(Time.realtimeSinceStartupAsDouble);
-                _adminView.ShowUnlocked(snapshot.Configuration.CustomerCode, _packageStore.HasPreviousPackage);
+                ActivateConfiguration(snapshot.Configuration, snapshot.Catalogue, startPaused: true);
+                _adminView.ShowLocked(_pinStore.HasPin, false);
                 _adminView.SetStatus("تم تفعيل حزمة العميل بنجاح / Customer package activated");
             }
             catch (Exception exception)
@@ -509,9 +511,39 @@ namespace AthmarLabs.VisionCount
             return "تعذر إكمال العملية بأمان: " + message;
         }
 
+        private void ApplyActiveRetention()
+        {
+            if (_activeConfig != null)
+                LocalRetentionEnforcer.ApplyRetentionPolicy(_activeConfig.RetentionDays);
+        }
+
+        private void RelockExpiredAdminSession()
+        {
+            if (_adminView == null || !_adminView.IsUnlocked)
+                return;
+            if (_adminSession.IsActive(Time.realtimeSinceStartupAsDouble))
+                return;
+
+            RelockAdministration("انتهت جلسة المدير. أدخل الرمز مجددًا / Administrator session expired");
+        }
+
+        private void RelockAdministration(string status)
+        {
+            _adminSession.End();
+            if (_adminView == null || !_adminView.IsUnlocked)
+                return;
+
+            _adminView.ShowLocked(_pinStore != null && _pinStore.HasPin, !_initialized);
+            _adminView.SetStatus(status, true);
+        }
+
         private void OnApplicationPause(bool paused)
         {
-            if (!_initialized || _reviewing)
+            if (paused)
+                RelockAdministration("تم قفل الإدارة عند انتقال التطبيق للخلفية / Administration relocked");
+            else
+                ApplyActiveRetention();
+            if (!_initialized || _reviewing || (!paused && _adminView.IsVisible))
                 return;
 
             if (paused)
@@ -522,6 +554,7 @@ namespace AthmarLabs.VisionCount
 
         private void OnDestroy()
         {
+            CancelInvoke(nameof(ApplyActiveRetention));
             Unsubscribe();
         }
     }

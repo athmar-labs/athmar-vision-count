@@ -1,5 +1,7 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Text;
 using NUnit.Framework;
 using UnityEngine;
@@ -59,6 +61,96 @@ namespace AthmarLabs.VisionCount.Tests
             Assert.AreEqual("customer-a", restored.Configuration.CustomerCode);
         }
 
+        [Test]
+        public void ActivePackageRetentionOverridesBundledFallbackWithoutDeletingOtherCustomer()
+        {
+            var store = new CustomerPackageStore(Path.Combine(_root, "packages"));
+            WriteStagingPackage(store, "customer-a", new byte[] { 1, 2, 3 }, retentionDays: 7);
+            store.ActivateStaging();
+            var sessions = new LocalScanRepository(Path.Combine(_root, "sessions"));
+            var exports = new ExportFileService(Path.Combine(_root, "exports"));
+            var now = new DateTime(2026, 7, 22, 12, 0, 0, DateTimeKind.Utc);
+
+            var expiredA = BuildSession("active-expired", now.AddDays(-10), "customer-a");
+            sessions.Save(expiredA);
+            var exportA = exports.SaveConfirmedSession(expiredA);
+            File.SetLastWriteTimeUtc(exportA, now.AddDays(-10));
+
+            var oldB = BuildSession("other-customer-old", now.AddDays(-60), "customer-b");
+            sessions.Save(oldB);
+            var exportB = exports.SaveConfirmedSession(oldB);
+            File.SetLastWriteTimeUtc(exportB, now.AddDays(-60));
+
+            LocalRetentionEnforcer.ApplyRetentionPolicy(
+                store,
+                "bundled-customer",
+                30,
+                sessions,
+                exports,
+                now);
+
+            var remaining = sessions.LoadAll();
+            Assert.That(remaining, Has.Count.EqualTo(1));
+            Assert.That(remaining[0].CustomerCode, Is.EqualTo("customer-b"));
+            Assert.That(File.Exists(exportA), Is.False);
+            Assert.That(File.Exists(exportB), Is.True);
+        }
+
+        [Test]
+        public void MalformedActivePackageUsesBundledRetentionFallbackWithoutTouchingOtherCustomer()
+        {
+            var store = new CustomerPackageStore(Path.Combine(_root, "packages"));
+            WriteStagingPackage(store, "customer-a", new byte[] { 1, 2, 3 }, retentionDays: 7);
+            store.ActivateStaging();
+            File.WriteAllText(Path.Combine(store.ActiveDirectory, CustomerPackageStore.ManifestFileName), "{invalid", Encoding.UTF8);
+            var sessions = new LocalScanRepository(Path.Combine(_root, "sessions"));
+            var exports = new ExportFileService(Path.Combine(_root, "exports"));
+            var now = new DateTime(2026, 7, 22, 12, 0, 0, DateTimeKind.Utc);
+
+            sessions.Save(BuildSession("fallback-recent", now.AddDays(-10), "bundled-customer"));
+            sessions.Save(BuildSession("fallback-expired", now.AddDays(-31), "bundled-customer"));
+            sessions.Save(BuildSession("other-customer-expired", now.AddDays(-100), "customer-a"));
+
+            LocalRetentionEnforcer.ApplyRetentionPolicy(
+                store,
+                "bundled-customer",
+                30,
+                sessions,
+                exports,
+                now);
+
+            var remaining = sessions.LoadAll();
+            Assert.That(remaining, Has.Count.EqualTo(2));
+            Assert.That(remaining.Any(session => session.SessionId == "fallback-recent"), Is.True);
+            Assert.That(remaining.Any(session => session.SessionId == "other-customer-expired"), Is.True);
+        }
+
+        [TestCase(0)]
+        [TestCase(-1)]
+        [TestCase(366)]
+        public void InvalidBundledRetentionNeverDeletesLocalData(int retentionDays)
+        {
+            var store = new CustomerPackageStore(Path.Combine(_root, "packages"));
+            var sessions = new LocalScanRepository(Path.Combine(_root, "sessions"));
+            var exports = new ExportFileService(Path.Combine(_root, "exports"));
+            var now = new DateTime(2026, 7, 22, 12, 0, 0, DateTimeKind.Utc);
+            var oldSession = BuildSession("must-remain", now.AddDays(-400), "bundled-customer");
+            sessions.Save(oldSession);
+            var exportPath = exports.SaveConfirmedSession(oldSession);
+            File.SetLastWriteTimeUtc(exportPath, now.AddDays(-400));
+
+            LocalRetentionEnforcer.ApplyRetentionPolicy(
+                store,
+                "bundled-customer",
+                retentionDays,
+                sessions,
+                exports,
+                now);
+
+            Assert.That(sessions.LoadAll(), Has.Count.EqualTo(1));
+            Assert.That(File.Exists(exportPath), Is.True);
+        }
+
         [TestCase("123456")]
         [TestCase("123456789012")]
         public void AdministratorPinAcceptsSixToTwelveDigits(string pin)
@@ -74,10 +166,34 @@ namespace AthmarLabs.VisionCount.Tests
             Assert.Throws<FormatException>(() => AdminPinStore.ValidatePin(pin));
         }
 
-        private static void WriteStagingPackage(CustomerPackageStore store, string customerCode, byte[] modelBytes)
+        private static ScanSessionRecord BuildSession(string sessionId, DateTime completedAtUtc, string customerCode)
+        {
+            return new ScanSessionRecord
+            {
+                SessionId = sessionId,
+                CustomerCode = customerCode,
+                StartedAtUtc = completedAtUtc.AddMinutes(-1).ToString("O"),
+                CompletedAtUtc = completedAtUtc.ToString("O"),
+                Confirmed = true,
+                OperatorReference = "operator",
+                LocationReference = "location",
+                Lines = new List<CountLine>
+                {
+                    new CountLine
+                    {
+                        Sku = "SKU-001",
+                        DisplayName = "Product",
+                        ProposedCount = 1,
+                        ConfirmedCount = 1
+                    }
+                }
+            };
+        }
+
+        private static void WriteStagingPackage(CustomerPackageStore store, string customerCode, byte[] modelBytes, int retentionDays = 30)
         {
             var catalogueBytes = CatalogueBytes();
-            var manifest = CreateManifest(customerCode, modelBytes, catalogueBytes);
+            var manifest = CreateManifest(customerCode, modelBytes, catalogueBytes, retentionDays);
             var staging = store.PrepareStagingDirectory();
             File.WriteAllText(
                 Path.Combine(staging, CustomerPackageStore.ManifestFileName),
@@ -87,7 +203,7 @@ namespace AthmarLabs.VisionCount.Tests
             File.WriteAllBytes(Path.Combine(staging, CustomerPackageStore.CatalogueFileName), catalogueBytes);
         }
 
-        private static CustomerPackageManifest CreateManifest(string customerCode, byte[] modelBytes, byte[] catalogueBytes)
+        private static CustomerPackageManifest CreateManifest(string customerCode, byte[] modelBytes, byte[] catalogueBytes, int retentionDays = 30)
         {
             return new CustomerPackageManifest
             {
@@ -115,7 +231,7 @@ namespace AthmarLabs.VisionCount.Tests
                 duplicateIouThreshold = 0.45f,
                 nonMaxSuppressionIouThreshold = 0.45f,
                 trackTtlSeconds = 1.25f,
-                retentionDays = 30
+                retentionDays = retentionDays
             };
         }
 

@@ -100,5 +100,37 @@ namespace AthmarLabs.VisionCount.Tests
             StringAssert.Contains("\"Aisle \"\"A\"\"\"", csv);
             StringAssert.Contains(",2,3,true", csv);
         }
+
+        [Test]
+        public void CsvExport_NeutralizesEveryTextColumnAndUnsafePrefix()
+        {
+            var session = new ScanSessionRecord
+            {
+                SessionId = "=SESSION",
+                StartedAtUtc = "+START",
+                CompletedAtUtc = "-END",
+                Confirmed = true,
+                OperatorReference = "@OPERATOR",
+                LocationReference = "  =LOCATION",
+                Lines = new List<CountLine>
+                {
+                    new CountLine
+                    {
+                        Sku = "\0=SKU",
+                        DisplayName = "\U000E0001=NAME,\"quoted\"",
+                        ProposedCount = 1,
+                        ConfirmedCount = 1
+                    }
+                }
+            };
+
+            var csv = CsvExportService.BuildConfirmedSessionCsv(session);
+            var expected =
+                "session_id,started_at_utc,completed_at_utc,operator_reference,location_reference,sku,display_name,proposed_count,confirmed_count,manually_adjusted" + Environment.NewLine +
+                "'=SESSION,'+START,'-END,'@OPERATOR,'  =LOCATION,'\0=SKU,\"'\U000E0001=NAME,\"\"quoted\"\"\",1,1,false" + Environment.NewLine;
+
+            Assert.That(csv, Is.EqualTo(expected));
+        }
+
     }
 }

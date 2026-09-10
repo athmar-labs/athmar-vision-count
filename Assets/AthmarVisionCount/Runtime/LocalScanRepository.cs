@@ -27,8 +27,10 @@ namespace AthmarLabs.VisionCount
             if (string.IsNullOrWhiteSpace(session.SessionId))
                 throw new InvalidOperationException("Session ID is required.");
 
+            session.CustomerCode = CustomerStorageScope.ResolveOrRequire(session.CustomerCode);
             Directory.CreateDirectory(_rootDirectory);
-            var path = Path.Combine(_rootDirectory, SanitizeFileName(session.SessionId) + ".json");
+            var fileName = CustomerStorageScope.StorageKey(session.CustomerCode) + "--" + SanitizeFileName(session.SessionId) + ".json";
+            var path = Path.Combine(_rootDirectory, fileName);
             var temporaryPath = path + ".tmp";
             var json = JsonUtility.ToJson(session, true);
             File.WriteAllText(temporaryPath, json, new UTF8Encoding(false));
@@ -64,8 +66,9 @@ namespace AthmarLabs.VisionCount
             return sessions;
         }
 
-        public int DeleteExpired(int retentionDays, DateTime? utcNow = null)
+        public int DeleteExpired(string customerCode, int retentionDays, DateTime? utcNow = null)
         {
+            customerCode = CustomerStorageScope.Require(customerCode);
             if (retentionDays < 1)
                 throw new ArgumentOutOfRangeException(nameof(retentionDays));
             if (!Directory.Exists(_rootDirectory))
@@ -77,10 +80,18 @@ namespace AthmarLabs.VisionCount
             {
                 try
                 {
-                    var timestamp = File.GetLastWriteTimeUtc(path);
                     var json = File.ReadAllText(path, Encoding.UTF8);
                     var session = JsonUtility.FromJson<ScanSessionRecord>(json);
-                    if (session != null && DateTime.TryParse(
+                    if (session == null || !string.Equals(
+                            CustomerStorageScope.Normalize(session.CustomerCode),
+                            customerCode,
+                            StringComparison.Ordinal))
+                    {
+                        continue;
+                    }
+
+                    var timestamp = File.GetLastWriteTimeUtc(path);
+                    if (DateTime.TryParse(
                             session.CompletedAtUtc,
                             CultureInfo.InvariantCulture,
                             DateTimeStyles.RoundtripKind,

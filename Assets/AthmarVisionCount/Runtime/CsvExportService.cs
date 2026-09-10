@@ -39,10 +39,31 @@ namespace AthmarLabs.VisionCount
 
         private static string Escape(string value)
         {
-            value = value ?? string.Empty;
+            value = NeutralizeSpreadsheetFormula(value ?? string.Empty);
             if (value.IndexOfAny(new[] { ',', '"', '\r', '\n' }) < 0)
                 return value;
             return "\"" + value.Replace("\"", "\"\"") + "\"";
+        }
+
+        private static string NeutralizeSpreadsheetFormula(string value)
+        {
+            if (value.Length == 0)
+                return value;
+
+            var index = 0;
+            var hasUnsafePrefix = false;
+            while (index < value.Length)
+            {
+                var category = CharUnicodeInfo.GetUnicodeCategory(value, index);
+                if (!char.IsWhiteSpace(value[index]) && category != UnicodeCategory.Control && category != UnicodeCategory.Format)
+                    break;
+                hasUnsafePrefix |= category == UnicodeCategory.Control || category == UnicodeCategory.Format;
+                index += char.IsHighSurrogate(value[index]) && index + 1 < value.Length && char.IsLowSurrogate(value[index + 1]) ? 2 : 1;
+            }
+
+            if (hasUnsafePrefix || (index < value.Length && (value[index] == '=' || value[index] == '+' || value[index] == '-' || value[index] == '@')))
+                return "'" + value;
+            return value;
         }
     }
 }
