@@ -1,0 +1,281 @@
+name: Real YOLOX-Nano Smoke Package
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - real-yolo-sentis-smoke
+    paths:
+      - ".github/workflows/real-yolo-smoke.yml"
+      - "tools/prepare_yolox_onnx.py"
+      - "Assets/AthmarVisionCount/Editor/RealYoloSmokePackageBuilder.cs"
+      - "Assets/AthmarVisionCount/Editor/RealYoloSmokePackageBuilder.cs.meta"
+      - "Assets/AthmarVisionCount/Runtime/**"
+      - "Packages/**"
+      - "ProjectSettings/**"
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+env:
+  UNITY_VERSION: 6000.3.10f1
+  PACKAGE_BASE_URL: https://athmar-labs.github.io/athmar-vision-count/yolox-smoke-v1
+  YOLOX_ONNX_URL: https://github.com/Megvii-BaseDetection/YOLOX/releases/download/0.1.1rc0/yolox_nano.onnx
+  YOLOX_ONNX_EXPECTED_SIZE: "3659407"
+
+concurrency:
+  group: real-yolox-smoke-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build and validate real YOLOX smoke package
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+
+      - name: Reclaim runner disk space for Unity
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo rm -rf \
+            /usr/share/dotnet \
+            /opt/ghc \
+            /usr/local/lib/android \
+            /usr/local/share/boost \
+            /usr/share/swift \
+            /opt/hostedtoolcache/CodeQL \
+            /usr/local/.ghcup \
+            /usr/local/share/chromium \
+            /opt/google/chrome \
+            /opt/microsoft/msedge || true
+          sudo apt-get clean
+          docker system prune --all --force --volumes || true
+          df -h /
+
+      - name: Download official YOLOX-Nano ONNX
+        id: source
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .ci
+          curl --proto '=https' --tlsv1.2 --fail --show-error --location --retry 3 \
+            "$YOLOX_ONNX_URL" \
+            --output .ci/yolox_nano_raw.onnx
+          actual_size="$(stat -c%s .ci/yolox_nano_raw.onnx)"
+          test "$actual_size" = "$YOLOX_ONNX_EXPECTED_SIZE"
+          raw_sha="$(sha256sum .ci/yolox_nano_raw.onnx | awk '{print $1}')"
+          echo "raw_sha=$raw_sha" >> "$GITHUB_OUTPUT"
+          echo "YOLOX-Nano source SHA-256: $raw_sha" >> "$GITHUB_STEP_SUMMARY"
+          echo "YOLOX-Nano source bytes: $actual_size" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Install pinned ONNX preparation dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m pip install --disable-pip-version-check --no-cache-dir \
+            onnx==1.17.0 \
+            numpy==1.26.4
+
+      - name: Prepare Unity-compatible decoded YOLOX graph
+        id: prepare
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tools/prepare_yolox_onnx.py \
+            --input .ci/yolox_nano_raw.onnx \
+            --output .ci/yolox_nano_unity.onnx \
+            | tee .ci/yolox_prepare.log
+          prepared_sha="$(grep '^PREPARED_SHA256=' .ci/yolox_prepare.log | cut -d= -f2)"
+          test -n "$prepared_sha"
+          echo "prepared_sha=$prepared_sha" >> "$GITHUB_OUTPUT"
+          echo "Prepared ONNX SHA-256: $prepared_sha" >> "$GITHUB_STEP_SUMMARY"
+          grep '^INPUT=' .ci/yolox_prepare.log >> "$GITHUB_STEP_SUMMARY"
+          grep '^OUTPUT=' .ci/yolox_prepare.log >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Verify Unity activation secrets
+        shell: bash
+        env:
+          UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
+          UNITY_SERIAL: ${{ secrets.UNITY_SERIAL }}
+          UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
+          UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          test -n "$UNITY_EMAIL"
+          test -n "$UNITY_PASSWORD"
+          if [ -n "$UNITY_SERIAL" ]; then
+            echo "Unity CI activation mode: professional serial"
+          elif [ -n "$UNITY_LICENSE" ]; then
+            echo "Unity CI activation mode: personal license file"
+          else
+            echo "Missing Unity activation credential."
+            exit 1
+          fi
+
+      - name: Convert YOLOX ONNX to production.sentis and validate CPU execution
+        uses: game-ci/unity-builder@4423ee75828dff56037d1d1cfdac6b68e3a6ba00
+        env:
+          UNITY_SERIAL: ${{ secrets.UNITY_SERIAL }}
+          UNITY_LICENSE: ${{ secrets.UNITY_SERIAL != '' && '' || secrets.UNITY_LICENSE }}
+          UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
+          UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+        with:
+          projectPath: .
+          unityVersion: ${{ env.UNITY_VERSION }}
+          targetPlatform: StandaloneLinux64
+          buildMethod: AthmarLabs.VisionCount.Editor.RealYoloSmokePackageBuilder.Build
+          customParameters: >-
+            -realYoloOnnxPath .ci/yolox_nano_unity.onnx
+            -realYoloPackageBaseUrl ${{ env.PACKAGE_BASE_URL }}
+            -realYoloSourceSha256 ${{ steps.source.outputs.raw_sha }}
+          runAsHostUser: true
+
+      - name: Validate generated runtime package
+        shell: bash
+        run: |
+          set -euo pipefail
+          package=Build/RealYoloSmokePackage
+          test -s "$package/production.sentis"
+          test -s "$package/sku_catalogue.csv"
+          test -s "$package/manifest.json"
+          test -s "$package/manifest.sha256"
+          test -s "$package/install-values.txt"
+          test -s "$package/MODEL_SOURCE.txt"
+          test -s "$package/validation.txt"
+          grep -Eq '^[0-9a-f]{64}$' "$package/manifest.sha256"
+          python3 - <<'PY'
+          import hashlib
+          import json
+          from pathlib import Path
+
+          root = Path("Build/RealYoloSmokePackage")
+          manifest_bytes = (root / "manifest.json").read_bytes()
+          expected_manifest = (root / "manifest.sha256").read_text().strip()
+          actual_manifest = hashlib.sha256(manifest_bytes).hexdigest()
+          if actual_manifest != expected_manifest:
+              raise SystemExit("Manifest SHA-256 mismatch")
+
+          manifest = json.loads(manifest_bytes)
+          expected = {
+              "modelInputWidth": 416,
+              "modelInputHeight": 416,
+              "modelInputLayout": "Nchw",
+              "outputTensorLayout": "RowsFirst",
+              "outputHasObjectness": True,
+              "outputCoordinatesNormalized": False,
+          }
+          for key, value in expected.items():
+              if manifest.get(key) != value:
+                  raise SystemExit(f"Unexpected manifest {key}: {manifest.get(key)!r}")
+
+          model_sha = hashlib.sha256((root / "production.sentis").read_bytes()).hexdigest()
+          catalogue_sha = hashlib.sha256((root / "sku_catalogue.csv").read_bytes()).hexdigest()
+          if model_sha != manifest["modelSha256"]:
+              raise SystemExit("Sentis SHA-256 mismatch")
+          if catalogue_sha != manifest["catalogueSha256"]:
+              raise SystemExit("Catalogue SHA-256 mismatch")
+          PY
+          echo '## Real YOLOX smoke package' >> "$GITHUB_STEP_SUMMARY"
+          echo '```text' >> "$GITHUB_STEP_SUMMARY"
+          cat "$package/validation.txt" >> "$GITHUB_STEP_SUMMARY"
+          cat "$package/install-values.txt" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload complete YOLOX smoke package artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: athmar-real-yolox-smoke-package
+          path: Build/RealYoloSmokePackage
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Prepare GitHub Pages content
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p _site/yolox-smoke-v1
+          cp Build/RealYoloSmokePackage/manifest.json _site/yolox-smoke-v1/
+          cp Build/RealYoloSmokePackage/manifest.sha256 _site/yolox-smoke-v1/
+          cp Build/RealYoloSmokePackage/install-values.txt _site/yolox-smoke-v1/
+          cp Build/RealYoloSmokePackage/production.sentis _site/yolox-smoke-v1/
+          cp Build/RealYoloSmokePackage/sku_catalogue.csv _site/yolox-smoke-v1/
+          cp Build/RealYoloSmokePackage/MODEL_SOURCE.txt _site/yolox-smoke-v1/
+          cp Build/RealYoloSmokePackage/validation.txt _site/yolox-smoke-v1/
+
+          mkdir -p _site/demo-customer-v1
+          for name in manifest.json manifest.sha256 install-values.txt production.sentis sku_catalogue.csv; do
+            curl --fail --silent --show-error --location \
+              "https://athmar-labs.github.io/athmar-vision-count/demo-customer-v1/$name" \
+              -o "_site/demo-customer-v1/$name" || rm -f "_site/demo-customer-v1/$name"
+          done
+
+          cat > _site/index.html <<'HTML'
+          <!doctype html>
+          <html lang="en"><head><meta charset="utf-8"><title>Athmar Vision Count Packages</title></head>
+          <body><h1>Athmar Vision Count runtime packages</h1><ul>
+          <li><a href="yolox-smoke-v1/install-values.txt">YOLOX-Nano real model smoke package</a></li>
+          <li><a href="demo-customer-v1/install-values.txt">Synthetic demo package</a></li>
+          </ul></body></html>
+          HTML
+
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@983d7736d9b0ae728b81ab479565c72886d7745b
+
+      - name: Upload GitHub Pages artifact
+        uses: actions/upload-pages-artifact@7b1f4a764d45c48632c6b24a0339c27f5614fb0b
+        with:
+          path: _site
+
+  deploy:
+    name: Publish real YOLOX smoke package
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+      - name: Deploy GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e
+
+      - name: Verify published runtime package
+        shell: bash
+        run: |
+          set -euo pipefail
+          base="$PACKAGE_BASE_URL"
+          mkdir -p /tmp/athmar-yolox-published
+          for attempt in {1..18}; do
+            if curl --fail --silent --show-error --location "$base/manifest.json" -o /tmp/athmar-yolox-published/manifest.json \
+              && curl --fail --silent --show-error --location "$base/manifest.sha256" -o /tmp/athmar-yolox-published/manifest.sha256 \
+              && curl --fail --silent --show-error --location "$base/production.sentis" -o /tmp/athmar-yolox-published/production.sentis \
+              && curl --fail --silent --show-error --location "$base/sku_catalogue.csv" -o /tmp/athmar-yolox-published/sku_catalogue.csv; then
+              break
+            fi
+            sleep 10
+          done
+          python3 - <<'PY'
+          import hashlib
+          import json
+          from pathlib import Path
+
+          root = Path('/tmp/athmar-yolox-published')
+          manifest_bytes = (root / 'manifest.json').read_bytes()
+          actual_manifest = hashlib.sha256(manifest_bytes).hexdigest()
+          expected_manifest = (root / 'manifest.sha256').read_text().strip()
+          if actual_manifest != expected_manifest:
+              raise SystemExit('Published manifest hash mismatch')
+          manifest = json.loads(manifest_bytes)
+          if hashlib.sha256((root / 'production.sentis').read_bytes()).hexdigest() != manifest['modelSha256']:
+              raise SystemExit('Published model hash mismatch')
+          if hashlib.sha256((root / 'sku_catalogue.csv').read_bytes()).hexdigest() != manifest['catalogueSha256']:
+              raise SystemExit('Published catalogue hash mismatch')
+          print(f"Manifest SHA-256: {actual_manifest}")
+          PY
+          echo "Published package: $base/manifest.json" >> "$GITHUB_STEP_SUMMARY"

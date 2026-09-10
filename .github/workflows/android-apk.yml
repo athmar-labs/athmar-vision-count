@@ -2,14 +2,6 @@ name: Build Signed Android APK
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - real-yolo-sentis-smoke
-    paths:
-      - ".github/workflows/android-apk.yml"
-      - "Assets/**"
-      - "Packages/**"
-      - "ProjectSettings/**"
 
 permissions:
   contents: read
@@ -34,7 +26,6 @@ jobs:
           set -euo pipefail
           echo "Disk space before cleanup:"
           df -h /
-
           sudo rm -rf \
             /usr/share/dotnet \
             /opt/ghc \
@@ -46,10 +37,8 @@ jobs:
             /usr/local/share/chromium \
             /opt/google/chrome \
             /opt/microsoft/msedge || true
-
           sudo apt-get clean
           docker system prune --all --force --volumes || true
-
           echo "Disk space after cleanup:"
           df -h /
           available_kb=$(df --output=avail / | tail -n 1 | tr -d ' ')
@@ -148,12 +137,12 @@ jobs:
       - name: Upload signed APK
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: athmar-current-main-android-apk
+          name: athmar-vision-count-android-apk
           path: |
             Build/AthmarVisionCount.apk
             Build/AthmarVisionCount.apk.sha256
           if-no-files-found: error
-          retention-days: 14
+          retention-days: 30
 
       - name: Remove signing and generated material
         if: always()
