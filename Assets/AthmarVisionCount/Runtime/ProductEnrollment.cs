@@ -64,9 +64,7 @@ namespace AthmarLabs.VisionCount
         public ProductEnrollmentStore(string customerCode, string rootDirectory = null)
         {
             _customerCode = CustomerStorageScope.Require(customerCode);
-            var root = string.IsNullOrWhiteSpace(rootDirectory)
-                ? Path.Combine(Application.persistentDataPath, "product-enrollments")
-                : Path.GetFullPath(rootDirectory);
+            var root = ResolveRootDirectory(rootDirectory);
             _customerDirectory = Path.Combine(root, CustomerStorageScope.StorageKey(_customerCode));
             _cataloguePath = Path.Combine(_customerDirectory, CatalogueFileName);
         }
@@ -181,6 +179,20 @@ namespace AthmarLabs.VisionCount
         {
             if (Directory.Exists(_customerDirectory))
                 Directory.Delete(_customerDirectory, true);
+        }
+
+        public static void DeleteAllLocalData(string rootDirectory = null)
+        {
+            var root = ResolveRootDirectory(rootDirectory);
+            if (Directory.Exists(root))
+                Directory.Delete(root, true);
+        }
+
+        private static string ResolveRootDirectory(string rootDirectory)
+        {
+            return string.IsNullOrWhiteSpace(rootDirectory)
+                ? Path.Combine(Application.persistentDataPath, "product-enrollments")
+                : Path.GetFullPath(rootDirectory);
         }
 
         private ProductEnrollmentCatalogueData NewCatalogue()
