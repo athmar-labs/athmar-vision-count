@@ -14,6 +14,7 @@ namespace AthmarLabs.VisionCount
         private ProductEnrollmentStore _store;
         private IProductEmbeddingExtractor _embeddingExtractor;
         private ProductRecognitionMatcher _matcher;
+        private bool _catalogueCompatible = true;
         private bool _subscribed;
 
         private void Awake()
@@ -24,7 +25,8 @@ namespace AthmarLabs.VisionCount
             if (_view == null)
                 _view = gameObject.AddComponent<ProductEnrollmentView>();
 
-            _embeddingExtractor = new MvpVisualEmbeddingExtractor();
+            // Do not construct a fallback descriptor here. The neural model is loaded lazily and
+            // enrollment fails closed if the shared Sentis resource is missing or invalid.
             _matcher = new ProductRecognitionMatcher();
             Subscribe();
         }
@@ -38,7 +40,25 @@ namespace AthmarLabs.VisionCount
             _store = new ProductEnrollmentStore(normalizedCustomerCode);
             _pendingReferences.Clear();
             var catalogue = _store.Load();
+            _catalogueCompatible = CatalogueUsesCurrentEmbeddingDimension(catalogue);
             _view.Show(normalizedCustomerCode, catalogue.products.Count);
+
+            if (!_catalogueCompatible)
+            {
+                _view.SetStatus(
+                    "بيانات تسجيل المنتجات الحالية أُنشئت ببصمة بصرية قديمة وغير متوافقة. " +
+                    "استخدم Delete Local Data ثم أعد تسجيل المنتجات بنموذج Sentis الجديد. / " +
+                    "Existing enrollment data uses an incompatible embedding version; delete local data and re-enroll.",
+                    true);
+                return;
+            }
+
+            if (!EnsureEmbeddingExtractor(out var error))
+                _view.SetStatus(error, true);
+            else
+                _view.SetStatus(
+                    "نموذج AI العام جاهز. ضع منتجًا واحدًا داخل الإطار والتقط 8–15 مرجعًا. / " +
+                    "Generic Sentis AI embedding ready; capture 8–15 views of one product.");
         }
 
         private void Update()
@@ -109,7 +129,7 @@ namespace AthmarLabs.VisionCount
             _pendingReferences.Add(embedding);
             _view.SetReferenceCount(_pendingReferences.Count);
             _view.SetStatus(
-                $"تم التقاط البصمة البصرية {_pendingReferences.Count}. " +
+                $"تم التقاط بصمة AI رقم {_pendingReferences.Count}. " +
                 "غيّر زاوية المنتج أو المسافة قليلًا ثم التقط التالية.");
         }
 
@@ -127,8 +147,8 @@ namespace AthmarLabs.VisionCount
                 _view.ResetDraft();
                 _view.SetProductCount(count);
                 _view.SetStatus(
-                    $"تم حفظ {saved.sku} محليًا لهذا العميل فقط. " +
-                    "يمكنك الآن وضع المنتج أمام الكاميرا واختيار Test Recognition.");
+                    $"تم حفظ {saved.sku} محليًا لهذا العميل باستخدام بصمة Sentis AI. " +
+                    "ضع المنتج أمام الكاميرا واختر Test Recognition.");
             }
             catch (Exception exception)
             {
@@ -166,7 +186,7 @@ namespace AthmarLabs.VisionCount
                 {
                     var reason = result.IsAmbiguous
                         ? "النتيجة متقاربة بين أكثر من منتج"
-                        : "الثقة أقل من حد MVP";
+                        : "التشابه أقل من الحد المطلوب";
                     _view.SetStatus(
                         $"غير معروف / Unknown — {reason}. " +
                         $"best={result.Similarity:0.000}, runner-up={result.RunnerUpSimilarity:0.000}",
@@ -203,18 +223,55 @@ namespace AthmarLabs.VisionCount
 
         private bool EnsureSession()
         {
-            if (_adminView != null && _adminView.IsUnlocked && _store != null)
+            if (_adminView == null || !_adminView.IsUnlocked || _store == null)
+            {
+                _pendingReferences.Clear();
+                _view.SetStatus("انتهت جلسة المدير. افتح لوحة الإدارة مجددًا.", true);
+                return false;
+            }
+
+            if (!_catalogueCompatible)
+            {
+                _view.SetStatus(
+                    "بيانات التسجيل القديمة غير متوافقة مع نموذج Sentis الحالي. احذف البيانات المحلية وأعد التسجيل.",
+                    true);
+                return false;
+            }
+
+            if (!EnsureEmbeddingExtractor(out var error))
+            {
+                _view.SetStatus(error, true);
+                return false;
+            }
+
+            return true;
+        }
+
+        private bool EnsureEmbeddingExtractor(out string error)
+        {
+            error = string.Empty;
+            if (_embeddingExtractor != null)
                 return true;
 
-            _pendingReferences.Clear();
-            _view.SetStatus("انتهت جلسة المدير. افتح لوحة الإدارة مجددًا.", true);
-            return false;
+            try
+            {
+                _embeddingExtractor = new SentisProductEmbeddingExtractor();
+                return true;
+            }
+            catch (Exception exception)
+            {
+                error = "تعذر تحميل نموذج AI العام للتسجيل / Generic Sentis embedding unavailable: " + exception.Message;
+                return false;
+            }
         }
 
         private bool TryCaptureEmbedding(out float[] embedding, out string error)
         {
             embedding = null;
             error = string.Empty;
+
+            if (!EnsureEmbeddingExtractor(out error))
+                return false;
 
             if (_inference == null || _inference.CameraTexture == null)
             {
@@ -230,7 +287,7 @@ namespace AthmarLabs.VisionCount
                 embedding = _embeddingExtractor.Extract(frame);
                 if (embedding == null || embedding.Length != _embeddingExtractor.Dimension)
                 {
-                    error = "مولد البصمة البصرية أعاد بيانات غير صالحة.";
+                    error = "نموذج AI أعاد بصمة غير صالحة.";
                     embedding = null;
                     return false;
                 }
@@ -238,7 +295,7 @@ namespace AthmarLabs.VisionCount
             }
             catch (Exception exception)
             {
-                error = "تعذر إنشاء البصمة البصرية: " + exception.Message;
+                error = "تعذر إنشاء بصمة AI: " + exception.Message;
                 embedding = null;
                 return false;
             }
@@ -247,6 +304,26 @@ namespace AthmarLabs.VisionCount
                 if (frame != null)
                     Destroy(frame);
             }
+        }
+
+        private static bool CatalogueUsesCurrentEmbeddingDimension(ProductEnrollmentCatalogueData catalogue)
+        {
+            if (catalogue?.products == null)
+                return true;
+
+            for (var productIndex = 0; productIndex < catalogue.products.Count; productIndex++)
+            {
+                var product = catalogue.products[productIndex];
+                if (product?.references == null)
+                    continue;
+                for (var referenceIndex = 0; referenceIndex < product.references.Count; referenceIndex++)
+                {
+                    var values = product.references[referenceIndex]?.values;
+                    if (values != null && values.Length != SentisProductEmbeddingExtractor.FeatureDimension)
+                        return false;
+                }
+            }
+            return true;
         }
 
         private static string ResolveDisplayName(ProductEnrollmentCatalogueData catalogue, string sku)
@@ -268,6 +345,9 @@ namespace AthmarLabs.VisionCount
         private void OnDestroy()
         {
             Unsubscribe();
+            if (_embeddingExtractor is IDisposable disposable)
+                disposable.Dispose();
+            _embeddingExtractor = null;
         }
     }
 
