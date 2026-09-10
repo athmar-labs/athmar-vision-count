@@ -30,7 +30,7 @@ Entering an existing SKU replaces that SKU's reference set instead of creating a
 
 ## Privacy and tenant isolation
 
-Reference camera frames are used only long enough to calculate a local visual descriptor. Raw enrollment photos are not written to disk by this MVP.
+Reference camera frames are used only long enough to calculate a local neural feature vector. Raw enrollment photos are not written to disk.
 
 Persisted enrollment data is stored under:
 
@@ -55,7 +55,7 @@ camera/product crop
 IProductEmbeddingExtractor
         |
         v
-float[] visual embedding
+float[] learned embedding
         |
         v
 ProductRecognitionMatcher
@@ -65,31 +65,40 @@ ProductRecognitionMatcher
         +--> Unknown / Ambiguous otherwise
 ```
 
-This means the same enrollment catalogue can survive replacement of the embedding implementation.
+## Generic Sentis embedding model
 
-## MVP visual descriptor
+The runtime implementation is now `SentisProductEmbeddingExtractor`. It uses one shared MobileNetV3 Small 0.75 neural feature backbone for every customer through Unity Inference Engine/Sentis.
 
-The first MVP uses `MvpVisualEmbeddingExtractor`, a deterministic on-device visual descriptor built from an 8 x 8 spatial RGB grid plus hue, saturation, value and luminance histograms, followed by L2 normalization and cosine similarity.
+The prepared model contract is:
 
-It exists to prove the complete self-service workflow immediately without introducing a customer-specific ML model or storing enrollment images.
+- input: `1 x 224 x 224 x 3`, NHWC RGB values in the 0..1 range;
+- ImageNet mean/std normalization is embedded into the generated ONNX graph;
+- output: one 1024-dimensional pre-classifier learned feature vector;
+- output is L2-normalized before storage/matching;
+- backend: GPUCompute when supported, otherwise CPU;
+- customer code, SKU, barcode and catalogue never select a different embedding model.
 
-**It is not the final production embedding model and must not be represented as one.**
+The old `MvpVisualEmbeddingExtractor` is no longer used by the runtime enrollment flow. If the neural model is absent or invalid, enrollment fails closed instead of falling back to the old deterministic color descriptor.
 
-The next recognition-quality increment should implement the same `IProductEmbeddingExtractor` interface with one generic, commercially approved Sentis embedding model shared by every customer. The product store, customer isolation, enrollment UI and matching API should not need to change.
+Existing enrollment data created by the old 240-dimensional MVP descriptor is intentionally treated as incompatible with the new 1024-dimensional model and must be deleted/re-enrolled before the neural pilot.
+
+The model preparation tool pins the upstream ONNX export commit and expected SHA-256, exposes the 1024-D pre-classifier tensor, embeds preprocessing, validates the resulting ONNX graph and writes provenance. Generated model artifacts remain outside Git history under `Assets/Generated`.
+
+The underlying TIMM model card declares Apache-2.0. That is technical provenance, not a substitute for final commercial/legal approval.
 
 ## Fail-closed matching
 
 The matcher requires both a minimum similarity and a minimum gap from the runner-up product. If the best candidate is below the threshold or too close to the second candidate, the result is **Unknown/Ambiguous** instead of silently assigning a SKU.
 
-Human review remains required by the main counting workflow.
+The existing similarity thresholds are provisional until physical-device evidence is collected. Human review remains required by the main counting workflow.
 
 ## Validation ladder
 
 ### Gate 1 — 5 real products
 
-Use visually different products. For each SKU, enroll 8-15 views, test at different angles and distances, test a non-enrolled object, and record accepted, rejected and ambiguous results.
+Use the five products in `FIVE_PRODUCT_SENTIS_PHONE_PILOT.md`. For each SKU, enroll 8-15 views, test at different angles and distances, test non-enrolled objects, and record accepted, rejected and ambiguous results.
 
-Proceed only if tenant isolation, save/reload and camera capture are stable.
+Proceed only if tenant isolation, save/reload, camera capture and the real Sentis embedding inference are stable.
 
 ### Gate 2 — 20 real products
 
@@ -99,12 +108,12 @@ Add products with similar colors and packaging. Measure correct recognition rate
 
 Include near-duplicate packaging and multiple package sizes. Measure the same metrics plus storage size, memory use, search latency and Android thermal behavior.
 
-Do not declare production recognition ready from synthetic EditMode tests alone.
+Do not declare production recognition ready from CI or synthetic EditMode tests alone.
 
-## What this MVP does not yet solve
+## What this increment does not yet solve
 
 - Multiple-product localization/cropping during the normal continuous count flow.
-- A production-grade generic learned embedding model.
+- Formal commercial/legal approval of the selected generic embedding model.
 - Automatic background synchronization of enrolled products.
 - Multi-device catalogue synchronization.
 - Cloud backup or customer portal.
