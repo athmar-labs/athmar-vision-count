@@ -28,10 +28,13 @@ namespace AthmarLabs.VisionCount
         private Button _authButton;
         private Button _installButton;
         private Button _rollbackButton;
+        private Button _manageProductsButton;
         private Button _closeButton;
         private bool _pinConfigured;
         private bool _configurationRequired;
         private bool _hasPreviousPackage;
+        private bool _hasActiveCustomer;
+        private string _activeCustomerCode = string.Empty;
 
         public bool IsVisible => _panel != null && _panel.activeSelf;
         public bool IsUnlocked => IsVisible && _packageSection != null && _packageSection.activeSelf;
@@ -47,6 +50,8 @@ namespace AthmarLabs.VisionCount
 
             _pinConfigured = pinConfigured;
             _configurationRequired = configurationRequired;
+            _hasActiveCustomer = false;
+            _activeCustomerCode = string.Empty;
             _panel.SetActive(true);
             _panel.transform.SetAsLastSibling();
             _authenticationSection.SetActive(true);
@@ -72,37 +77,45 @@ namespace AthmarLabs.VisionCount
             EnsureInterfaceBuilt();
 
             _hasPreviousPackage = hasPreviousPackage;
+            _activeCustomerCode = string.IsNullOrWhiteSpace(customerCode) ? string.Empty : customerCode.Trim();
+            _hasActiveCustomer = _activeCustomerCode.Length > 0;
             _panel.SetActive(true);
             _panel.transform.SetAsLastSibling();
             _authenticationSection.SetActive(false);
             _packageSection.SetActive(true);
             _pinInput.text = string.Empty;
             _title.text = "إدارة العميل والنموذج / Customer & Model Administration";
-            _customerText.text = string.IsNullOrWhiteSpace(customerCode)
+            _customerText.text = !_hasActiveCustomer
                 ? "لا توجد حزمة عميل مفعلة / No active customer package"
-                : "العميل الحالي / Active customer: " + customerCode;
+                : "العميل الحالي / Active customer: " + _activeCustomerCode;
             _statusText.color = Color.white;
-            _statusText.text = "أدخل رابط Manifest وبصمة SHA-256 من قناة موثوقة، ثم اضغط تثبيت.";
-            _closeButton.gameObject.SetActive(!_configurationRequired || !string.IsNullOrWhiteSpace(customerCode));
+            _statusText.text = _hasActiveCustomer
+                ? "يمكنك إضافة منتجات هذا العميل من داخل التطبيق أو تحديث حزمة الرؤية."
+                : "ثبّت حزمة العميل أولًا، ثم أضف منتجاته من داخل التطبيق.";
+            _closeButton.gameObject.SetActive(!_configurationRequired || _hasActiveCustomer);
             SetBusy(false);
         }
 
         public void SetStatus(string message, bool isError = false)
         {
+            EnsureInterfaceBuilt();
             _statusText.color = isError ? new Color(1f, 0.45f, 0.45f) : Color.white;
             _statusText.text = message ?? string.Empty;
         }
 
         public void SetBusy(bool busy)
         {
+            EnsureInterfaceBuilt();
             _authButton.interactable = !busy;
             _installButton.interactable = !busy;
             _rollbackButton.interactable = !busy && _hasPreviousPackage;
+            _manageProductsButton.interactable = !busy && _hasActiveCustomer;
             _closeButton.interactable = !busy;
         }
 
         public void Hide()
         {
+            EnsureInterfaceBuilt();
             _panel.SetActive(false);
         }
 
@@ -171,39 +184,66 @@ namespace AthmarLabs.VisionCount
             _authButton.onClick.AddListener(HandleAuthentication);
 
             var packageRect = CreateRect("PackageSection", panelRect);
-            Place(packageRect, 0.05f, 0.18f, 0.95f, 0.70f);
+            Place(packageRect, 0.05f, 0.15f, 0.95f, 0.70f);
             var packageBackground = packageRect.gameObject.AddComponent<Image>();
             packageBackground.color = new Color(0.07f, 0.10f, 0.14f, 1f);
             _packageSection = packageRect.gameObject;
 
-            var packageTitle = CreateText("PackageTitle", packageRect, 28, FontStyle.Bold, TextAnchor.MiddleCenter);
-            packageTitle.text = "تثبيت أو تحديث حزمة العميل / Install or Update Customer Package";
-            Place(packageTitle.rectTransform, 0.04f, 0.82f, 0.96f, 0.98f);
+            var packageTitle = CreateText("PackageTitle", packageRect, 27, FontStyle.Bold, TextAnchor.MiddleCenter);
+            packageTitle.text = "حزمة الرؤية ومنتجات العميل / Vision Package & Customer Products";
+            Place(packageTitle.rectTransform, 0.04f, 0.84f, 0.96f, 0.98f);
 
             _manifestUrlInput = CreateInputField("ManifestUrl", packageRect, "رابط Manifest HTTPS");
-            Place(_manifestUrlInput.GetComponent<RectTransform>(), 0.05f, 0.58f, 0.95f, 0.76f);
+            Place(_manifestUrlInput.GetComponent<RectTransform>(), 0.05f, 0.65f, 0.95f, 0.80f);
             _manifestUrlInput.contentType = InputField.ContentType.Standard;
             _manifestUrlInput.keyboardType = TouchScreenKeyboardType.URL;
 
             _manifestHashInput = CreateInputField("ManifestHash", packageRect, "بصمة Manifest SHA-256");
-            Place(_manifestHashInput.GetComponent<RectTransform>(), 0.05f, 0.35f, 0.95f, 0.53f);
+            Place(_manifestHashInput.GetComponent<RectTransform>(), 0.05f, 0.46f, 0.95f, 0.61f);
             _manifestHashInput.contentType = InputField.ContentType.Alphanumeric;
             _manifestHashInput.characterLimit = 64;
 
             _installButton = CreateButton("Install", packageRect, "تحقق وثبّت / Verify & Install", out _);
-            Place(_installButton.GetComponent<RectTransform>(), 0.05f, 0.08f, 0.57f, 0.28f);
-            _installButton.onClick.AddListener(() => InstallRequested?.Invoke(_manifestUrlInput.text.Trim(), _manifestHashInput.text.Trim()));
+            Place(_installButton.GetComponent<RectTransform>(), 0.05f, 0.27f, 0.57f, 0.41f);
+            _installButton.onClick.AddListener(() =>
+                InstallRequested?.Invoke(_manifestUrlInput.text.Trim(), _manifestHashInput.text.Trim()));
 
             _rollbackButton = CreateButton("Rollback", packageRect, "رجوع للسابق / Rollback", out _);
-            Place(_rollbackButton.GetComponent<RectTransform>(), 0.60f, 0.08f, 0.95f, 0.28f);
+            Place(_rollbackButton.GetComponent<RectTransform>(), 0.60f, 0.27f, 0.95f, 0.41f);
             _rollbackButton.onClick.AddListener(() => RollbackRequested?.Invoke());
 
+            _manageProductsButton = CreateButton(
+                "ManageProducts",
+                packageRect,
+                "إضافة المنتجات ذاتيًا / Self-Service Products",
+                out _);
+            Place(_manageProductsButton.GetComponent<RectTransform>(), 0.05f, 0.06f, 0.95f, 0.21f);
+            _manageProductsButton.onClick.AddListener(OpenProductEnrollment);
+
             _closeButton = CreateButton("Close", panelRect, "إغلاق / Close", out _);
-            Place(_closeButton.GetComponent<RectTransform>(), 0.30f, 0.055f, 0.70f, 0.125f);
+            Place(_closeButton.GetComponent<RectTransform>(), 0.30f, 0.045f, 0.70f, 0.115f);
             _closeButton.onClick.AddListener(() => CloseRequested?.Invoke());
 
             _packageSection.SetActive(false);
             _panel.SetActive(false);
+        }
+
+        private void OpenProductEnrollment()
+        {
+            if (!_hasActiveCustomer)
+                return;
+
+            try
+            {
+                var coordinator = GetComponent<ProductEnrollmentCoordinator>();
+                if (coordinator == null)
+                    coordinator = gameObject.AddComponent<ProductEnrollmentCoordinator>();
+                coordinator.Open(_activeCustomerCode);
+            }
+            catch (Exception exception)
+            {
+                SetStatus(exception.Message, true);
+            }
         }
 
         private void HandleAuthentication()

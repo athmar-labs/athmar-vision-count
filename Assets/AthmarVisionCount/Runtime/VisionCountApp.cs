@@ -474,6 +474,7 @@ namespace AthmarLabs.VisionCount
 
             try
             {
+                ProductEnrollmentStore.DeleteAllLocalData();
                 _repository.DeleteAllLocalData();
                 _exports.DeleteAll();
                 _counting.Reset();
