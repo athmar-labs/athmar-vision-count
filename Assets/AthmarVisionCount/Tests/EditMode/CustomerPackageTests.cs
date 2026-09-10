@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Text;
 using NUnit.Framework;
 using UnityEngine;
@@ -61,7 +62,7 @@ namespace AthmarLabs.VisionCount.Tests
         }
 
         [Test]
-        public void ActivePackageRetentionOverridesBundledFallback()
+        public void ActivePackageRetentionOverridesBundledFallbackWithoutDeletingOtherCustomer()
         {
             var store = new CustomerPackageStore(Path.Combine(_root, "packages"));
             WriteStagingPackage(store, "customer-a", new byte[] { 1, 2, 3 }, retentionDays: 7);
@@ -69,19 +70,34 @@ namespace AthmarLabs.VisionCount.Tests
             var sessions = new LocalScanRepository(Path.Combine(_root, "sessions"));
             var exports = new ExportFileService(Path.Combine(_root, "exports"));
             var now = new DateTime(2026, 7, 22, 12, 0, 0, DateTimeKind.Utc);
-            var expired = BuildSession("active-expired", now.AddDays(-10));
-            sessions.Save(expired);
-            var exportPath = exports.SaveConfirmedSession(expired);
-            File.SetLastWriteTimeUtc(exportPath, now.AddDays(-10));
 
-            LocalRetentionEnforcer.ApplyRetentionPolicy(store, 30, sessions, exports, now);
+            var expiredA = BuildSession("active-expired", now.AddDays(-10), "customer-a");
+            sessions.Save(expiredA);
+            var exportA = exports.SaveConfirmedSession(expiredA);
+            File.SetLastWriteTimeUtc(exportA, now.AddDays(-10));
 
-            Assert.That(sessions.LoadAll(), Is.Empty);
-            Assert.That(File.Exists(exportPath), Is.False);
+            var oldB = BuildSession("other-customer-old", now.AddDays(-60), "customer-b");
+            sessions.Save(oldB);
+            var exportB = exports.SaveConfirmedSession(oldB);
+            File.SetLastWriteTimeUtc(exportB, now.AddDays(-60));
+
+            LocalRetentionEnforcer.ApplyRetentionPolicy(
+                store,
+                "bundled-customer",
+                30,
+                sessions,
+                exports,
+                now);
+
+            var remaining = sessions.LoadAll();
+            Assert.That(remaining, Has.Count.EqualTo(1));
+            Assert.That(remaining[0].CustomerCode, Is.EqualTo("customer-b"));
+            Assert.That(File.Exists(exportA), Is.False);
+            Assert.That(File.Exists(exportB), Is.True);
         }
 
         [Test]
-        public void MalformedActivePackageUsesBundledRetentionFallback()
+        public void MalformedActivePackageUsesBundledRetentionFallbackWithoutTouchingOtherCustomer()
         {
             var store = new CustomerPackageStore(Path.Combine(_root, "packages"));
             WriteStagingPackage(store, "customer-a", new byte[] { 1, 2, 3 }, retentionDays: 7);
@@ -90,14 +106,23 @@ namespace AthmarLabs.VisionCount.Tests
             var sessions = new LocalScanRepository(Path.Combine(_root, "sessions"));
             var exports = new ExportFileService(Path.Combine(_root, "exports"));
             var now = new DateTime(2026, 7, 22, 12, 0, 0, DateTimeKind.Utc);
-            sessions.Save(BuildSession("fallback-recent", now.AddDays(-10)));
-            sessions.Save(BuildSession("fallback-expired", now.AddDays(-31)));
 
-            LocalRetentionEnforcer.ApplyRetentionPolicy(store, 30, sessions, exports, now);
+            sessions.Save(BuildSession("fallback-recent", now.AddDays(-10), "bundled-customer"));
+            sessions.Save(BuildSession("fallback-expired", now.AddDays(-31), "bundled-customer"));
+            sessions.Save(BuildSession("other-customer-expired", now.AddDays(-100), "customer-a"));
+
+            LocalRetentionEnforcer.ApplyRetentionPolicy(
+                store,
+                "bundled-customer",
+                30,
+                sessions,
+                exports,
+                now);
 
             var remaining = sessions.LoadAll();
-            Assert.That(remaining, Has.Count.EqualTo(1));
-            Assert.That(remaining[0].SessionId, Is.EqualTo("fallback-recent"));
+            Assert.That(remaining, Has.Count.EqualTo(2));
+            Assert.That(remaining.Any(session => session.SessionId == "fallback-recent"), Is.True);
+            Assert.That(remaining.Any(session => session.SessionId == "other-customer-expired"), Is.True);
         }
 
         [TestCase(0)]
@@ -109,12 +134,18 @@ namespace AthmarLabs.VisionCount.Tests
             var sessions = new LocalScanRepository(Path.Combine(_root, "sessions"));
             var exports = new ExportFileService(Path.Combine(_root, "exports"));
             var now = new DateTime(2026, 7, 22, 12, 0, 0, DateTimeKind.Utc);
-            var oldSession = BuildSession("must-remain", now.AddDays(-400));
+            var oldSession = BuildSession("must-remain", now.AddDays(-400), "bundled-customer");
             sessions.Save(oldSession);
             var exportPath = exports.SaveConfirmedSession(oldSession);
             File.SetLastWriteTimeUtc(exportPath, now.AddDays(-400));
 
-            LocalRetentionEnforcer.ApplyRetentionPolicy(store, retentionDays, sessions, exports, now);
+            LocalRetentionEnforcer.ApplyRetentionPolicy(
+                store,
+                "bundled-customer",
+                retentionDays,
+                sessions,
+                exports,
+                now);
 
             Assert.That(sessions.LoadAll(), Has.Count.EqualTo(1));
             Assert.That(File.Exists(exportPath), Is.True);
@@ -135,11 +166,12 @@ namespace AthmarLabs.VisionCount.Tests
             Assert.Throws<FormatException>(() => AdminPinStore.ValidatePin(pin));
         }
 
-        private static ScanSessionRecord BuildSession(string sessionId, DateTime completedAtUtc)
+        private static ScanSessionRecord BuildSession(string sessionId, DateTime completedAtUtc, string customerCode)
         {
             return new ScanSessionRecord
             {
                 SessionId = sessionId,
+                CustomerCode = customerCode,
                 StartedAtUtc = completedAtUtc.AddMinutes(-1).ToString("O"),
                 CompletedAtUtc = completedAtUtc.ToString("O"),
                 Confirmed = true,

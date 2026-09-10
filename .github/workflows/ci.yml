@@ -31,7 +31,7 @@ jobs:
           sudo rm -rf /tmp/* /var/lib/apt/lists/* /opt/unity/Editor/Data/Tools/libRL* 2>/dev/null || true
           docker system prune -a --volumes -f || true
           df -h
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0
 
@@ -41,6 +41,7 @@ jobs:
           python - <<'PY'
           import json
           import pathlib
+          import re
           import subprocess
 
           required = [
@@ -53,6 +54,7 @@ jobs:
               pathlib.Path("Assets/AthmarVisionCount/Runtime/CustomerPackageStore.cs"),
               pathlib.Path("Assets/AthmarVisionCount/Runtime/CustomerPackageInstaller.cs"),
               pathlib.Path("Assets/AthmarVisionCount/Runtime/CustomerAdminView.cs"),
+              pathlib.Path("Assets/AthmarVisionCount/Runtime/CustomerStorageScope.cs"),
               pathlib.Path("Assets/AthmarVisionCount/Runtime/AdminPinStore.cs"),
               pathlib.Path("Assets/AthmarVisionCount/Runtime/YoloOutputDecoder.cs"),
               pathlib.Path("Assets/AthmarVisionCount/Runtime/SkuCatalogue.cs"),
@@ -79,6 +81,14 @@ jobs:
           project_version = pathlib.Path("ProjectSettings/ProjectVersion.txt").read_text(encoding="utf-8")
           if "6000.3.10f1" not in project_version:
               raise SystemExit("Unity editor version is not pinned to 6000.3.10f1")
+
+          workflow_text = pathlib.Path(".github/workflows/ci.yml").read_text(encoding="utf-8")
+          for line in workflow_text.splitlines():
+              stripped = line.strip()
+              if stripped.startswith("uses:") or stripped.startswith("- uses:"):
+                  reference = stripped.split("uses:", 1)[1].split("#", 1)[0].strip()
+                  if not re.search(r"@[0-9a-f]{40}$", reference):
+                      raise SystemExit("GitHub Action references must be pinned to reviewed 40-character commit SHAs: " + reference)
 
           tracked = subprocess.check_output(["git", "ls-files"], text=True).splitlines()
           forbidden_suffixes = (".keystore", ".jks", ".p12", ".pem", ".key", ".onnx", ".sentis", ".tflite")
@@ -110,7 +120,7 @@ jobs:
           sudo rm -rf /tmp/* /var/lib/apt/lists/* /opt/unity/Editor/Data/Tools/libRL* 2>/dev/null || true
           docker system prune -a --volumes -f || true
           df -h
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Reclaim runner disk space for Unity test image
         shell: bash
@@ -164,7 +174,7 @@ jobs:
           fi
 
       - name: Run EditMode tests
-        uses: game-ci/unity-test-runner@v4
+        uses: game-ci/unity-test-runner@32e57712352b500e17974b245a6dce9e11a73213 # v4
         env:
           UNITY_SERIAL: ${{ secrets.UNITY_SERIAL }}
           UNITY_LICENSE: ${{ secrets.UNITY_SERIAL != '' && '' || secrets.UNITY_LICENSE }}
@@ -179,7 +189,7 @@ jobs:
 
       - name: Upload test results
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: unity-editmode-results
           path: test-results
@@ -201,7 +211,7 @@ jobs:
           sudo rm -rf /tmp/* /var/lib/apt/lists/* /opt/unity/Editor/Data/Tools/libRL* 2>/dev/null || true
           docker system prune -a --volumes -f || true
           df -h
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Reclaim runner disk space for Unity Android image
         shell: bash
@@ -283,7 +293,7 @@ jobs:
           PY
 
       - name: Build validated generic Android App Bundle
-        uses: game-ci/unity-builder@v4
+        uses: game-ci/unity-builder@4423ee75828dff56037d1d1cfdac6b68e3a6ba00 # v4
         env:
           UNITY_SERIAL: ${{ secrets.UNITY_SERIAL }}
           UNITY_LICENSE: ${{ secrets.UNITY_SERIAL != '' && '' || secrets.UNITY_LICENSE }}
@@ -307,7 +317,7 @@ jobs:
           runAsHostUser: true
 
       - name: Upload signed generic release package
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: athmar-vision-count-android-release
           path: |

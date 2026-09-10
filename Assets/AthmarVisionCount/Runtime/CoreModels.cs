@@ -69,6 +69,7 @@ namespace AthmarLabs.VisionCount
     public sealed class ScanSessionRecord
     {
         public string SessionId;
+        public string CustomerCode;
         public string StartedAtUtc;
         public string CompletedAtUtc;
         public bool Confirmed;

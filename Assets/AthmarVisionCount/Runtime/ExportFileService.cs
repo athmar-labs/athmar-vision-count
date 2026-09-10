@@ -24,8 +24,9 @@ namespace AthmarLabs.VisionCount
             if (!session.Confirmed)
                 throw new InvalidOperationException("Only a confirmed session can be exported.");
 
+            session.CustomerCode = CustomerStorageScope.ResolveOrRequire(session.CustomerCode);
             Directory.CreateDirectory(_rootDirectory);
-            var fileName = SanitizeFileName(session.SessionId) + ".csv";
+            var fileName = CustomerStorageScope.StorageKey(session.CustomerCode) + "--" + SanitizeFileName(session.SessionId) + ".csv";
             var path = Path.Combine(_rootDirectory, fileName);
             var temporaryPath = path + ".tmp";
             File.WriteAllText(temporaryPath, CsvExportService.BuildConfirmedSessionCsv(session), new UTF8Encoding(true));
@@ -47,19 +48,23 @@ namespace AthmarLabs.VisionCount
             return files;
         }
 
-        public int DeleteExpired(int retentionDays, DateTime? utcNow = null)
+        public int DeleteExpired(string customerCode, int retentionDays, DateTime? utcNow = null)
         {
+            customerCode = CustomerStorageScope.Require(customerCode);
             if (retentionDays < 1)
                 throw new ArgumentOutOfRangeException(nameof(retentionDays));
             if (!Directory.Exists(_rootDirectory))
                 return 0;
 
+            var prefix = CustomerStorageScope.StorageKey(customerCode) + "--";
             var cutoff = (utcNow ?? DateTime.UtcNow).ToUniversalTime().AddDays(-retentionDays);
             var deleted = 0;
             foreach (var path in Directory.GetFiles(_rootDirectory, "*.csv", SearchOption.TopDirectoryOnly))
             {
                 try
                 {
+                    if (!Path.GetFileName(path).StartsWith(prefix, StringComparison.Ordinal))
+                        continue;
                     if (File.GetLastWriteTimeUtc(path) > cutoff)
                         continue;
                     File.Delete(path);

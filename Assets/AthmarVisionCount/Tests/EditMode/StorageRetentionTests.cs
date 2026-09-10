@@ -33,41 +33,51 @@ namespace AthmarLabs.VisionCount.Tests
         }
 
         [Test]
-        public void RetentionDeletesExpiredSessionButKeepsRecentSession()
+        public void RetentionDeletesOnlyExpiredSessionsForRequestedCustomer()
         {
             var repository = new LocalScanRepository(Path.Combine(_root, "sessions"));
             var now = new DateTime(2026, 7, 22, 12, 0, 0, DateTimeKind.Utc);
-            repository.Save(BuildSession(true, now.AddDays(-40).ToString("O"), "expired"));
-            repository.Save(BuildSession(true, now.AddDays(-5).ToString("O"), "recent"));
+            repository.Save(BuildSession(true, now.AddDays(-40).ToString("O"), "expired-a", "customer-a"));
+            repository.Save(BuildSession(true, now.AddDays(-5).ToString("O"), "recent-a", "customer-a"));
+            repository.Save(BuildSession(true, now.AddDays(-90).ToString("O"), "expired-b", "customer-b"));
 
-            var deleted = repository.DeleteExpired(30, now);
+            var deleted = repository.DeleteExpired("customer-a", 30, now);
             var remaining = repository.LoadAll();
 
             Assert.That(deleted, Is.EqualTo(1));
-            Assert.That(remaining, Has.Count.EqualTo(1));
-            Assert.That(remaining[0].SessionId, Is.EqualTo("recent"));
+            Assert.That(remaining, Has.Count.EqualTo(2));
+            Assert.That(remaining[0].SessionId == "recent-a" || remaining[1].SessionId == "recent-a", Is.True);
+            Assert.That(remaining[0].SessionId == "expired-b" || remaining[1].SessionId == "expired-b", Is.True);
         }
 
         [Test]
-        public void ExportRetentionDeletesOldCsvFiles()
+        public void ExportRetentionDeletesOnlyRequestedCustomerFiles()
         {
             var exportRoot = Path.Combine(_root, "exports");
             var exports = new ExportFileService(exportRoot);
-            var path = exports.SaveConfirmedSession(BuildSession(true, DateTime.UtcNow.ToString("O"), "export-old"));
             var now = new DateTime(2026, 7, 22, 12, 0, 0, DateTimeKind.Utc);
-            File.SetLastWriteTimeUtc(path, now.AddDays(-31));
+            var pathA = exports.SaveConfirmedSession(BuildSession(true, now.AddDays(-31).ToString("O"), "export-a", "customer-a"));
+            var pathB = exports.SaveConfirmedSession(BuildSession(true, now.AddDays(-60).ToString("O"), "export-b", "customer-b"));
+            File.SetLastWriteTimeUtc(pathA, now.AddDays(-31));
+            File.SetLastWriteTimeUtc(pathB, now.AddDays(-60));
 
-            var deleted = exports.DeleteExpired(30, now);
+            var deleted = exports.DeleteExpired("customer-a", 30, now);
 
             Assert.That(deleted, Is.EqualTo(1));
-            Assert.That(File.Exists(path), Is.False);
+            Assert.That(File.Exists(pathA), Is.False);
+            Assert.That(File.Exists(pathB), Is.True);
         }
 
-        private static ScanSessionRecord BuildSession(bool confirmed, string completedAtUtc, string sessionId = "session")
+        private static ScanSessionRecord BuildSession(
+            bool confirmed,
+            string completedAtUtc,
+            string sessionId = "session",
+            string customerCode = "customer-a")
         {
             return new ScanSessionRecord
             {
                 SessionId = sessionId,
+                CustomerCode = customerCode,
                 StartedAtUtc = "2026-07-01T00:00:00.0000000Z",
                 CompletedAtUtc = completedAtUtc,
                 Confirmed = confirmed,

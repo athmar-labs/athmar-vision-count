@@ -6,15 +6,29 @@ namespace AthmarLabs.VisionCount
     public static class LocalRetentionEnforcer
     {
         private const int MaximumRetentionDays = 365;
+        private const string ConfigResourceName = "AthmarVisionCountConfig";
+
+        private readonly struct RetentionPolicy
+        {
+            public RetentionPolicy(string customerCode, int retentionDays)
+            {
+                CustomerCode = customerCode;
+                RetentionDays = retentionDays;
+            }
+
+            public string CustomerCode { get; }
+            public int RetentionDays { get; }
+        }
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
         private static void ApplyRetention()
         {
             try
             {
-                var config = Resources.Load<AppConfig>("AthmarVisionCountConfig");
+                var config = Resources.Load<AppConfig>(ConfigResourceName);
                 ApplyRetentionPolicy(
                     new CustomerPackageStore(),
+                    config == null ? string.Empty : config.CustomerCode,
                     config == null ? 0 : config.RetentionDays,
                     new LocalScanRepository(),
                     new ExportFileService(),
@@ -30,8 +44,10 @@ namespace AthmarLabs.VisionCount
         {
             try
             {
+                var config = Resources.Load<AppConfig>(ConfigResourceName);
                 ApplyRetentionPolicy(
-                    null,
+                    new CustomerPackageStore(),
+                    config == null ? string.Empty : config.CustomerCode,
                     retentionDays,
                     new LocalScanRepository(),
                     new ExportFileService(),
@@ -45,6 +61,7 @@ namespace AthmarLabs.VisionCount
 
         public static void ApplyRetentionPolicy(
             CustomerPackageStore packageStore,
+            string bundledCustomerCode,
             int bundledRetentionDays,
             LocalScanRepository sessions,
             ExportFileService exports,
@@ -55,31 +72,53 @@ namespace AthmarLabs.VisionCount
             if (exports == null)
                 throw new ArgumentNullException(nameof(exports));
 
-            var retentionDays = ResolveRetentionDays(packageStore, bundledRetentionDays);
-            if (retentionDays == 0)
+            var policy = ResolveRetentionPolicy(packageStore, bundledCustomerCode, bundledRetentionDays);
+            if (!policy.HasValue)
                 return;
 
-            var sessionsDeleted = sessions.DeleteExpired(retentionDays, utcNow);
-            var exportsDeleted = exports.DeleteExpired(retentionDays, utcNow);
+            var sessionsDeleted = sessions.DeleteExpired(policy.Value.CustomerCode, policy.Value.RetentionDays, utcNow);
+            var exportsDeleted = exports.DeleteExpired(policy.Value.CustomerCode, policy.Value.RetentionDays, utcNow);
             if (sessionsDeleted > 0 || exportsDeleted > 0)
-                Debug.Log($"Applied local retention: deleted {sessionsDeleted} sessions and {exportsDeleted} exports.");
+            {
+                Debug.Log(
+                    $"Applied local retention for customer '{policy.Value.CustomerCode}': " +
+                    $"deleted {sessionsDeleted} sessions and {exportsDeleted} exports.");
+            }
         }
 
-        private static int ResolveRetentionDays(CustomerPackageStore packageStore, int bundledRetentionDays)
+        private static RetentionPolicy? ResolveRetentionPolicy(
+            CustomerPackageStore packageStore,
+            string bundledCustomerCode,
+            int bundledRetentionDays)
         {
             if (packageStore != null)
             {
                 if (packageStore.TryLoadActive(out var snapshot, out var error))
-                    return snapshot.Configuration.RetentionDays;
-                if (!string.IsNullOrEmpty(error))
+                {
+                    var customerCode = CustomerStorageScope.Normalize(snapshot.Configuration.CustomerCode);
+                    var retentionDays = snapshot.Configuration.RetentionDays;
+                    if (customerCode.Length > 0 && IsValidRetention(retentionDays))
+                        return new RetentionPolicy(customerCode, retentionDays);
+
+                    Debug.LogWarning("Active customer package retention is invalid; using bundled fallback.");
+                }
+                else if (!string.IsNullOrEmpty(error))
+                {
                     Debug.LogWarning("Active customer package retention is invalid; using bundled fallback: " + error);
+                }
             }
 
-            if (bundledRetentionDays >= 1 && bundledRetentionDays <= MaximumRetentionDays)
-                return bundledRetentionDays;
+            bundledCustomerCode = CustomerStorageScope.Normalize(bundledCustomerCode);
+            if (bundledCustomerCode.Length > 0 && IsValidRetention(bundledRetentionDays))
+                return new RetentionPolicy(bundledCustomerCode, bundledRetentionDays);
 
-            Debug.LogWarning("Local retention was skipped because no valid retention policy is available.");
-            return 0;
+            Debug.LogWarning("Local retention was skipped because no valid customer-scoped retention policy is available.");
+            return null;
+        }
+
+        private static bool IsValidRetention(int retentionDays)
+        {
+            return retentionDays >= 1 && retentionDays <= MaximumRetentionDays;
         }
     }
 }
