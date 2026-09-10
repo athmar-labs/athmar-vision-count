@@ -50,6 +50,15 @@ namespace AthmarLabs.VisionCount
             {
                 _pendingReferences.Clear();
                 _view.Hide();
+                return;
+            }
+
+            if (_inference != null)
+            {
+                _view.SetCamera(
+                    _inference.CameraTexture,
+                    _inference.VideoRotationAngle,
+                    _inference.VideoVerticallyMirrored);
             }
         }
 

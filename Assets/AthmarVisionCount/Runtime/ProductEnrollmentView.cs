@@ -16,6 +16,8 @@ namespace AthmarLabs.VisionCount
 
         private Font _font;
         private GameObject _panel;
+        private RawImage _cameraImage;
+        private AspectRatioFitter _cameraAspect;
         private Text _customerText;
         private Text _statusText;
         private Text _referenceText;
@@ -50,7 +52,7 @@ namespace AthmarLabs.VisionCount
             ResetDraft();
             SetProductCount(_productCount);
             SetStatus(
-                "أدخل بيانات المنتج، وجّه الكاميرا إلى منتج واحد يملأ الإطار، ثم التقط 8–15 صورة من زوايا مختلفة. " +
+                "اجعل منتجًا واحدًا يملأ معظم معاينة الكاميرا، ثم التقط 8–15 مرجعًا من زوايا ومسافات مختلفة. " +
                 "الصور الخام لا تُحفظ.");
             SetBusy(false);
         }
@@ -59,6 +61,24 @@ namespace AthmarLabs.VisionCount
         {
             if (_panel != null)
                 _panel.SetActive(false);
+        }
+
+        public void SetCamera(Texture texture, int rotationAngle, bool verticallyMirrored)
+        {
+            EnsureInterfaceBuilt();
+            if (_cameraImage.texture != texture)
+                _cameraImage.texture = texture;
+            if (texture == null)
+                return;
+
+            var rotated = Math.Abs(rotationAngle) == 90 || Math.Abs(rotationAngle) == 270;
+            _cameraAspect.aspectRatio = rotated
+                ? texture.height / (float)Math.Max(1, texture.width)
+                : texture.width / (float)Math.Max(1, texture.height);
+            _cameraImage.rectTransform.localEulerAngles = new Vector3(0f, 0f, -rotationAngle);
+            _cameraImage.uvRect = verticallyMirrored
+                ? new Rect(0f, 1f, 1f, -1f)
+                : new Rect(0f, 0f, 1f, 1f);
         }
 
         public void SetReferenceCount(int referenceCount)
@@ -104,8 +124,8 @@ namespace AthmarLabs.VisionCount
                 return;
 
             _referenceText.text =
-                $"الصور المرجعية / References: {_referenceCount}/{ProductEnrollmentStore.MinimumReferenceCount} min " +
-                $"({_referenceCount}/{ProductEnrollmentStore.MaximumReferenceCount} max)";
+                $"الصور المرجعية / References: {_referenceCount} " +
+                $"(min {ProductEnrollmentStore.MinimumReferenceCount}, max {ProductEnrollmentStore.MaximumReferenceCount})";
             _productCountText.text = $"المنتجات المسجلة / Enrolled products: {_productCount}";
             UpdateButtonState();
         }
@@ -168,79 +188,85 @@ namespace AthmarLabs.VisionCount
             background.color = new Color(0.025f, 0.04f, 0.065f, 0.995f);
             _panel = panelRect.gameObject;
 
-            var title = CreateText("Title", panelRect, 37, FontStyle.Bold, TextAnchor.MiddleCenter);
+            var title = CreateText("Title", panelRect, 34, FontStyle.Bold, TextAnchor.MiddleCenter);
             title.text = "إضافة المنتجات ذاتيًا / Self-Service Product Enrollment";
-            Place(title.rectTransform, 0.05f, 0.91f, 0.95f, 0.98f);
+            Place(title.rectTransform, 0.04f, 0.945f, 0.96f, 0.99f);
 
-            _customerText = CreateText("Customer", panelRect, 23, FontStyle.Normal, TextAnchor.MiddleCenter);
-            Place(_customerText.rectTransform, 0.05f, 0.865f, 0.95f, 0.91f);
+            _customerText = CreateText("Customer", panelRect, 21, FontStyle.Normal, TextAnchor.MiddleCenter);
+            Place(_customerText.rectTransform, 0.04f, 0.905f, 0.96f, 0.945f);
 
-            _productCountText = CreateText("ProductCount", panelRect, 22, FontStyle.Bold, TextAnchor.MiddleCenter);
-            Place(_productCountText.rectTransform, 0.05f, 0.82f, 0.95f, 0.865f);
+            _productCountText = CreateText("ProductCount", panelRect, 21, FontStyle.Bold, TextAnchor.MiddleCenter);
+            Place(_productCountText.rectTransform, 0.04f, 0.865f, 0.96f, 0.905f);
+
+            var cameraRect = CreateRect("EnrollmentCamera", panelRect);
+            Place(cameraRect, 0.055f, 0.545f, 0.945f, 0.855f);
+            var cameraBackground = cameraRect.gameObject.AddComponent<Image>();
+            cameraBackground.color = Color.black;
+
+            var cameraImageRect = CreateRect("CameraImage", cameraRect);
+            Stretch(cameraImageRect);
+            _cameraImage = cameraImageRect.gameObject.AddComponent<RawImage>();
+            _cameraImage.color = Color.white;
+            _cameraImage.raycastTarget = false;
+            _cameraAspect = cameraImageRect.gameObject.AddComponent<AspectRatioFitter>();
+            _cameraAspect.aspectMode = AspectRatioFitter.AspectMode.FitInParent;
+            _cameraAspect.aspectRatio = 16f / 9f;
+
+            var cameraHint = CreateText("CameraHint", cameraRect, 20, FontStyle.Bold, TextAnchor.LowerCenter);
+            Stretch(cameraHint.rectTransform);
+            cameraHint.rectTransform.offsetMin = new Vector2(14f, 10f);
+            cameraHint.rectTransform.offsetMax = new Vector2(-14f, -10f);
+            cameraHint.text = "ضع منتجًا واحدًا داخل الإطار / Keep one product centered";
+            cameraHint.raycastTarget = false;
 
             var formRect = CreateRect("ProductForm", panelRect);
-            Place(formRect, 0.055f, 0.42f, 0.945f, 0.81f);
+            Place(formRect, 0.055f, 0.325f, 0.945f, 0.535f);
             var formBackground = formRect.gameObject.AddComponent<Image>();
             formBackground.color = new Color(0.07f, 0.10f, 0.14f, 1f);
 
             _skuInput = CreateInputField("Sku", formRect, "SKU / رمز الصنف");
-            Place(_skuInput.GetComponent<RectTransform>(), 0.05f, 0.76f, 0.95f, 0.94f);
+            Place(_skuInput.GetComponent<RectTransform>(), 0.04f, 0.77f, 0.96f, 0.96f);
             _skuInput.characterLimit = 64;
 
             _nameArabicInput = CreateInputField("NameArabic", formRect, "اسم المنتج بالعربية");
-            Place(_nameArabicInput.GetComponent<RectTransform>(), 0.05f, 0.55f, 0.95f, 0.72f);
+            Place(_nameArabicInput.GetComponent<RectTransform>(), 0.04f, 0.53f, 0.96f, 0.72f);
             _nameArabicInput.characterLimit = 160;
 
             _nameEnglishInput = CreateInputField("NameEnglish", formRect, "Product name in English");
-            Place(_nameEnglishInput.GetComponent<RectTransform>(), 0.05f, 0.34f, 0.95f, 0.51f);
+            Place(_nameEnglishInput.GetComponent<RectTransform>(), 0.04f, 0.29f, 0.96f, 0.48f);
             _nameEnglishInput.characterLimit = 160;
 
             _barcodeInput = CreateInputField("Barcode", formRect, "Barcode اختياري / optional");
-            Place(_barcodeInput.GetComponent<RectTransform>(), 0.05f, 0.13f, 0.95f, 0.30f);
+            Place(_barcodeInput.GetComponent<RectTransform>(), 0.04f, 0.05f, 0.96f, 0.24f);
             _barcodeInput.characterLimit = 128;
             _barcodeInput.keyboardType = TouchScreenKeyboardType.NumberPad;
 
-            _referenceText = CreateText("ReferenceCount", panelRect, 22, FontStyle.Bold, TextAnchor.MiddleCenter);
-            Place(_referenceText.rectTransform, 0.05f, 0.365f, 0.95f, 0.415f);
+            _referenceText = CreateText("ReferenceCount", panelRect, 20, FontStyle.Bold, TextAnchor.MiddleCenter);
+            Place(_referenceText.rectTransform, 0.04f, 0.285f, 0.96f, 0.325f);
 
-            _statusText = CreateText("Status", panelRect, 21, FontStyle.Normal, TextAnchor.MiddleCenter);
-            Place(_statusText.rectTransform, 0.065f, 0.275f, 0.935f, 0.365f);
+            _statusText = CreateText("Status", panelRect, 19, FontStyle.Normal, TextAnchor.MiddleCenter);
+            Place(_statusText.rectTransform, 0.055f, 0.215f, 0.945f, 0.285f);
             _statusText.horizontalOverflow = HorizontalWrapMode.Wrap;
             _statusText.verticalOverflow = VerticalWrapMode.Truncate;
 
-            _captureButton = CreateButton(
-                "CaptureReference",
-                panelRect,
-                "التقاط صورة مرجعية / Capture Reference");
-            Place(_captureButton.GetComponent<RectTransform>(), 0.07f, 0.205f, 0.49f, 0.27f);
+            _captureButton = CreateButton("CaptureReference", panelRect, "التقاط مرجع / Capture");
+            Place(_captureButton.GetComponent<RectTransform>(), 0.06f, 0.15f, 0.49f, 0.21f);
             _captureButton.onClick.AddListener(() => CaptureReferenceRequested?.Invoke());
 
-            _saveButton = CreateButton(
-                "SaveProduct",
-                panelRect,
-                "حفظ المنتج / Save Product");
-            Place(_saveButton.GetComponent<RectTransform>(), 0.51f, 0.205f, 0.93f, 0.27f);
+            _saveButton = CreateButton("SaveProduct", panelRect, "حفظ المنتج / Save");
+            Place(_saveButton.GetComponent<RectTransform>(), 0.51f, 0.15f, 0.94f, 0.21f);
             _saveButton.onClick.AddListener(HandleSave);
 
-            _testButton = CreateButton(
-                "TestRecognition",
-                panelRect,
-                "اختبر المنتج أمام الكاميرا / Test Recognition");
-            Place(_testButton.GetComponent<RectTransform>(), 0.07f, 0.13f, 0.93f, 0.195f);
+            _testButton = CreateButton("TestRecognition", panelRect, "اختبر التعرف الآن / Test Recognition");
+            Place(_testButton.GetComponent<RectTransform>(), 0.06f, 0.085f, 0.94f, 0.145f);
             _testButton.onClick.AddListener(() => TestRecognitionRequested?.Invoke());
 
-            _clearButton = CreateButton(
-                "ClearDraft",
-                panelRect,
-                "مسح النموذج / Clear");
-            Place(_clearButton.GetComponent<RectTransform>(), 0.07f, 0.055f, 0.46f, 0.12f);
+            _clearButton = CreateButton("ClearDraft", panelRect, "مسح / Clear");
+            Place(_clearButton.GetComponent<RectTransform>(), 0.06f, 0.02f, 0.47f, 0.075f);
             _clearButton.onClick.AddListener(() => ClearDraftRequested?.Invoke());
 
-            _closeButton = CreateButton(
-                "Close",
-                panelRect,
-                "رجوع للإدارة / Back");
-            Place(_closeButton.GetComponent<RectTransform>(), 0.54f, 0.055f, 0.93f, 0.12f);
+            _closeButton = CreateButton("Close", panelRect, "رجوع / Back");
+            Place(_closeButton.GetComponent<RectTransform>(), 0.53f, 0.02f, 0.94f, 0.075f);
             _closeButton.onClick.AddListener(() => CloseRequested?.Invoke());
 
             _panel.SetActive(false);
@@ -254,15 +280,15 @@ namespace AthmarLabs.VisionCount
             image.color = new Color(0.12f, 0.16f, 0.21f, 1f);
 
             var input = rect.gameObject.AddComponent<InputField>();
-            var text = CreateText("Text", rect, 23, FontStyle.Normal, TextAnchor.MiddleLeft);
+            var text = CreateText("Text", rect, 21, FontStyle.Normal, TextAnchor.MiddleLeft);
             Stretch(text.rectTransform);
-            text.rectTransform.offsetMin = new Vector2(18f, 6f);
-            text.rectTransform.offsetMax = new Vector2(-18f, -6f);
+            text.rectTransform.offsetMin = new Vector2(14f, 4f);
+            text.rectTransform.offsetMax = new Vector2(-14f, -4f);
 
-            var placeholder = CreateText("Placeholder", rect, 21, FontStyle.Italic, TextAnchor.MiddleLeft);
+            var placeholder = CreateText("Placeholder", rect, 19, FontStyle.Italic, TextAnchor.MiddleLeft);
             Stretch(placeholder.rectTransform);
-            placeholder.rectTransform.offsetMin = new Vector2(18f, 6f);
-            placeholder.rectTransform.offsetMax = new Vector2(-18f, -6f);
+            placeholder.rectTransform.offsetMin = new Vector2(14f, 4f);
+            placeholder.rectTransform.offsetMax = new Vector2(-14f, -4f);
             placeholder.text = placeholderValue;
             placeholder.color = new Color(0.62f, 0.67f, 0.72f, 1f);
 
@@ -279,7 +305,7 @@ namespace AthmarLabs.VisionCount
             image.color = new Color(0.08f, 0.48f, 0.72f, 1f);
             var button = rect.gameObject.AddComponent<Button>();
             button.targetGraphic = image;
-            var label = CreateText("Text", rect, 21, FontStyle.Bold, TextAnchor.MiddleCenter);
+            var label = CreateText("Text", rect, 20, FontStyle.Bold, TextAnchor.MiddleCenter);
             Stretch(label.rectTransform);
             label.text = value;
             return button;
