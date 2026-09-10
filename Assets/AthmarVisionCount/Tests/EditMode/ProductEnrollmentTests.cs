@@ -100,6 +100,26 @@ namespace AthmarLabs.VisionCount.Tests
         }
 
         [Test]
+        public void DeleteAllLocalDataPurgesEveryCustomerEnrollmentScope()
+        {
+            var first = new ProductEnrollmentStore("CUSTOMER-A", _root);
+            var second = new ProductEnrollmentStore("CUSTOMER-B", _root);
+            first.UpsertProduct(
+                new ProductEnrollmentDraft("A-001", "Bottle", "زجاجة", "111"),
+                BuildReferences(1));
+            second.UpsertProduct(
+                new ProductEnrollmentDraft("B-001", "Cup", "كوب", "222"),
+                BuildReferences(2));
+
+            Assert.That(Directory.Exists(first.CustomerDirectory), Is.True);
+            Assert.That(Directory.Exists(second.CustomerDirectory), Is.True);
+
+            ProductEnrollmentStore.DeleteAllLocalData(_root);
+
+            Assert.That(Directory.Exists(_root), Is.False);
+        }
+
+        [Test]
         public void StoreRejectsTooFewReferenceViews()
         {
             var store = new ProductEnrollmentStore("CUSTOMER-A", _root);
