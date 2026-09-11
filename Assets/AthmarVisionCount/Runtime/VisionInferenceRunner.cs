@@ -8,6 +8,9 @@ namespace AthmarLabs.VisionCount
 {
     public sealed class VisionInferenceRunner : MonoBehaviour
     {
+        private const double CameraDeviceDiscoveryTimeoutSeconds = 8d;
+        private const double CameraFrameTimeoutSeconds = 12d;
+
         public event Action<IReadOnlyList<Detection>> DetectionsReady;
         public event Action<string> StatusChanged;
         public event Action<string> Faulted;
@@ -117,8 +120,6 @@ namespace AthmarLabs.VisionCount
             {
                 _activeInferenceStage = "create_resources";
                 CreateInferenceResources();
-                _activeInferenceStage = "start_camera";
-                StartRearCamera();
             }
             catch (Exception exception)
             {
@@ -127,13 +128,68 @@ namespace AthmarLabs.VisionCount
                 yield break;
             }
 
-            var timeoutAt = Time.realtimeSinceStartupAsDouble + 10d;
-            while (_cameraTexture != null && _cameraTexture.isPlaying && _cameraTexture.width <= 16 && Time.realtimeSinceStartupAsDouble < timeoutAt)
+            // Android can grant the camera permission before Unity refreshes WebCamTexture.devices.
+            // Give the application focus and the device list time to settle instead of failing on
+            // the first empty enumeration immediately after the permission dialog closes.
+            yield return null;
+            _activeInferenceStage = "discover_camera";
+            StatusChanged?.Invoke("discovering_camera");
+
+            var discoveryTimeoutAt = Time.realtimeSinceStartupAsDouble + CameraDeviceDiscoveryTimeoutSeconds;
+            while (_cameraTexture == null && Time.realtimeSinceStartupAsDouble < discoveryTimeoutAt)
+            {
+                if (!Application.isFocused)
+                {
+                    yield return null;
+                    continue;
+                }
+
+                var devices = WebCamTexture.devices;
+                if (devices != null && devices.Length > 0)
+                {
+                    try
+                    {
+                        _activeInferenceStage = "start_camera";
+                        StartRearCamera(devices);
+                    }
+                    catch (Exception exception)
+                    {
+                        ReportDetailedFault("Unable to initialize on-device inference", _activeInferenceStage, exception);
+                        StopPipeline();
+                        yield break;
+                    }
+
+                    break;
+                }
+
+                yield return null;
+            }
+
+            // Some Android devices can open the default camera even when Unity's device enumeration
+            // remains temporarily empty. Let the actual frame timeout decide whether the fallback works.
+            if (_cameraTexture == null)
+            {
+                try
+                {
+                    _activeInferenceStage = "start_default_camera";
+                    StartDefaultCamera();
+                }
+                catch (Exception exception)
+                {
+                    ReportDetailedFault("Unable to initialize on-device inference", _activeInferenceStage, exception);
+                    StopPipeline();
+                    yield break;
+                }
+            }
+
+            _activeInferenceStage = "wait_for_camera_frame";
+            var frameTimeoutAt = Time.realtimeSinceStartupAsDouble + CameraFrameTimeoutSeconds;
+            while (_cameraTexture != null && _cameraTexture.isPlaying && _cameraTexture.width <= 16 && Time.realtimeSinceStartupAsDouble < frameTimeoutAt)
                 yield return null;
 
             if (_cameraTexture == null || !_cameraTexture.isPlaying || _cameraTexture.width <= 16)
             {
-                ReportFault("The device camera did not provide frames within the allowed time.");
+                ReportFault("The device camera did not provide frames within the allowed time. Confirm camera permission and close other apps using the camera.");
                 StopPipeline();
                 yield break;
             }
@@ -173,13 +229,11 @@ namespace AthmarLabs.VisionCount
                 _cpuInputBuffer = new float[checked(_config.ModelInputWidth * _config.ModelInputHeight * 3)];
         }
 
-        private void StartRearCamera()
+        private void StartRearCamera(WebCamDevice[] devices)
         {
             EnsureConfigured();
-
-            var devices = WebCamTexture.devices;
             if (devices == null || devices.Length == 0)
-                throw new InvalidOperationException("No camera is available on this device.");
+                throw new ArgumentException("At least one camera device is required.", nameof(devices));
 
             var selected = devices[0];
             for (var index = 0; index < devices.Length; index++)
@@ -192,6 +246,16 @@ namespace AthmarLabs.VisionCount
 
             _cameraTexture = new WebCamTexture(
                 selected.name,
+                Math.Max(1280, _config.ModelInputWidth),
+                Math.Max(720, _config.ModelInputHeight),
+                30);
+            _cameraTexture.Play();
+        }
+
+        private void StartDefaultCamera()
+        {
+            EnsureConfigured();
+            _cameraTexture = new WebCamTexture(
                 Math.Max(1280, _config.ModelInputWidth),
                 Math.Max(720, _config.ModelInputHeight),
                 30);
