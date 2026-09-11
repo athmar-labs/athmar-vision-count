@@ -13,7 +13,7 @@ namespace AthmarLabs.VisionCount
         private VisionInferenceRunner _inference;
         private ProductEnrollmentStore _store;
         private IProductEmbeddingExtractor _embeddingExtractor;
-        private ProductRecognitionMatcher _matcher;
+        private RobustProductRecognitionMatcher _matcher;
         private bool _catalogueCompatible = true;
         private bool _subscribed;
 
@@ -27,7 +27,7 @@ namespace AthmarLabs.VisionCount
 
             // Do not construct a fallback descriptor here. The neural model is loaded lazily and
             // enrollment fails closed if the shared Sentis resource is missing or invalid.
-            _matcher = new ProductRecognitionMatcher();
+            _matcher = new RobustProductRecognitionMatcher();
             Subscribe();
         }
 
@@ -186,17 +186,17 @@ namespace AthmarLabs.VisionCount
                 {
                     var reason = result.IsAmbiguous
                         ? "النتيجة متقاربة بين أكثر من منتج"
-                        : "التشابه أقل من الحد المطلوب";
+                        : "لم تتفق عدة صور مرجعية على المنتج أو كان التشابه أقل من الحد المطلوب";
                     _view.SetStatus(
                         $"غير معروف / Unknown — {reason}. " +
-                        $"best={result.Similarity:0.000}, runner-up={result.RunnerUpSimilarity:0.000}",
+                        $"consensus={result.Similarity:0.000}, runner-up={result.RunnerUpSimilarity:0.000}",
                         true);
                     return;
                 }
 
                 var displayName = ResolveDisplayName(catalogue, result.Sku);
                 _view.SetStatus(
-                    $"تم التعرف: {displayName} [{result.Sku}] — similarity={result.Similarity:0.000}");
+                    $"تم التعرف: {displayName} [{result.Sku}] — consensus={result.Similarity:0.000}");
             }
             catch (Exception exception)
             {
