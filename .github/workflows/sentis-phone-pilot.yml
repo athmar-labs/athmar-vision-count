@@ -5,8 +5,17 @@ on:
     paths:
       - ".github/workflows/sentis-phone-pilot.yml"
       - "tools/prepare_generic_embedding_model.py"
+      - "tools/build_bulk_catalogue.py"
       - "Assets/AthmarVisionCount/Runtime/SentisProductEmbeddingExtractor.cs"
       - "Assets/AthmarVisionCount/Runtime/ProductEnrollmentCoordinator.cs"
+      - "Assets/AthmarVisionCount/Runtime/ProductEnrollmentView.cs"
+      - "Assets/AthmarVisionCount/Runtime/CustomerAdminView.cs"
+      - "Assets/AthmarVisionCount/Runtime/CustomerPackageManifest.cs"
+      - "Assets/AthmarVisionCount/Runtime/CustomerPackageStore.cs"
+      - "Assets/AthmarVisionCount/Runtime/CustomerPackageInstaller.cs"
+      - "Assets/AthmarVisionCount/Runtime/BulkProductCatalogue.cs"
+      - "Assets/AthmarVisionCount/Runtime/BulkEmbeddingIndex.cs"
+      - "Assets/AthmarVisionCount/Runtime/ProductEvidenceResolver.cs"
       - "Assets/AthmarVisionCount/Runtime/VisionInferenceRunner.cs"
       - "Assets/AthmarVisionCount/Runtime/CpuRgbTensorWriter.cs"
       - "Assets/AthmarVisionCount/Editor/GenericEmbeddingPilotBuilder.cs"
@@ -39,7 +48,10 @@ jobs:
             protobuf==5.28.3 \
             onnx==1.17.0
           python tools/prepare_generic_embedding_model.py
+          python -m py_compile tools/build_bulk_catalogue.py
+          rm -rf tools/__pycache__
           test -s Assets/Generated/Resources/AthmarGenericEmbedding.onnx
+          test -z "$(git status --porcelain --untracked-files=all | grep -v '^?? Assets/Generated/' || true)"
 
       - name: Reclaim runner disk space for Unity Android image
         shell: bash
