@@ -101,8 +101,13 @@ namespace AthmarLabs.VisionCount
                         builder.Append(tokens[start + index]);
 
                     var candidate = builder.ToString();
-                    if (candidate.Length < 4 || !_ocrAliasToSku.TryGetValue(candidate, out var sku) || string.IsNullOrEmpty(sku))
+                    if (candidate.Length < 4 || !_ocrAliasToSku.TryGetValue(candidate, out var sku))
                         continue;
+                    if (string.IsNullOrEmpty(sku))
+                    {
+                        ambiguous = true;
+                        return false;
+                    }
 
                     if (matchedSku == null)
                     {
@@ -139,6 +144,7 @@ namespace AthmarLabs.VisionCount
             var byBarcode = new Dictionary<string, BulkProductDefinition>(StringComparer.OrdinalIgnoreCase);
             var ocrAliasToSku = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             var entries = new List<BulkProductDefinition>();
+            var totalProducts = 0;
 
             while (true)
             {
@@ -149,7 +155,8 @@ namespace AthmarLabs.VisionCount
                 if (string.IsNullOrWhiteSpace(line) || line.TrimStart().StartsWith("#", StringComparison.Ordinal))
                     continue;
 
-                if (entries.Count >= MaximumProductCount)
+                totalProducts++;
+                if (totalProducts > MaximumProductCount)
                     throw new FormatException($"The bulk product catalogue exceeds {MaximumProductCount} products.");
 
                 var fields = ParseCsvLine(line);
