@@ -18,6 +18,17 @@ namespace AthmarLabs.VisionCount
         public string modelSha256 = string.Empty;
         public string catalogueUrl = string.Empty;
         public string catalogueSha256 = string.Empty;
+
+        // Schema v2: customer product data for the generic embedding recognizer.
+        public string bulkCatalogueUrl = string.Empty;
+        public string bulkCatalogueSha256 = string.Empty;
+        public string bulkEmbeddingIndexUrl = string.Empty;
+        public string bulkEmbeddingIndexSha256 = string.Empty;
+        public string bulkEmbeddingModelId = string.Empty;
+        public float bulkMinimumSimilarity = ProductEvidenceResolver.DefaultBulkMinimumSimilarity;
+        public float bulkMinimumMargin = ProductEvidenceResolver.DefaultBulkMinimumMargin;
+        public int bulkCandidateLimit = BulkEmbeddingIndex.DefaultCandidateLimit;
+
         public int modelInputWidth = 640;
         public int modelInputHeight = 640;
         public string modelInputLayout = "Nchw";
@@ -36,6 +47,8 @@ namespace AthmarLabs.VisionCount
         public bool networkSyncEnabled;
         public string syncEndpoint = string.Empty;
 
+        public bool HasBulkCatalogue => schemaVersion >= 2;
+
         public static CustomerPackageManifest Parse(string json)
         {
             if (string.IsNullOrWhiteSpace(json))
@@ -50,7 +63,7 @@ namespace AthmarLabs.VisionCount
 
         public void Validate()
         {
-            if (schemaVersion != 1)
+            if (schemaVersion != 1 && schemaVersion != 2)
                 throw new FormatException($"Unsupported customer manifest schema {schemaVersion}.");
 
             customerCode = RequireText(customerCode, "customerCode");
@@ -69,6 +82,27 @@ namespace AthmarLabs.VisionCount
             catalogueUrl = RequireHttpsUrl(catalogueUrl, "catalogueUrl");
             modelSha256 = NormalizeSha256(modelSha256, "modelSha256");
             catalogueSha256 = NormalizeSha256(catalogueSha256, "catalogueSha256");
+
+            if (HasBulkCatalogue)
+            {
+                bulkCatalogueUrl = RequireHttpsUrl(bulkCatalogueUrl, "bulkCatalogueUrl");
+                bulkCatalogueSha256 = NormalizeSha256(bulkCatalogueSha256, "bulkCatalogueSha256");
+                bulkEmbeddingIndexUrl = RequireHttpsUrl(bulkEmbeddingIndexUrl, "bulkEmbeddingIndexUrl");
+                bulkEmbeddingIndexSha256 = NormalizeSha256(bulkEmbeddingIndexSha256, "bulkEmbeddingIndexSha256");
+                bulkEmbeddingModelId = RequireText(bulkEmbeddingModelId, "bulkEmbeddingModelId");
+                RequireRange(bulkMinimumSimilarity, -1f, 1f, "bulkMinimumSimilarity");
+                RequireRange(bulkMinimumMargin, 0f, 2f, "bulkMinimumMargin");
+                if (bulkCandidateLimit < 16 || bulkCandidateLimit > 4096)
+                    throw new FormatException("bulkCandidateLimit must be from 16 to 4096.");
+            }
+            else
+            {
+                bulkCatalogueUrl = string.Empty;
+                bulkCatalogueSha256 = string.Empty;
+                bulkEmbeddingIndexUrl = string.Empty;
+                bulkEmbeddingIndexSha256 = string.Empty;
+                bulkEmbeddingModelId = string.Empty;
+            }
 
             if (modelInputWidth < 32 || modelInputWidth > 4096 || modelInputHeight < 32 || modelInputHeight > 4096)
                 throw new FormatException("Model dimensions must be from 32 to 4096 pixels.");
