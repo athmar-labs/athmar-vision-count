@@ -11,18 +11,25 @@ namespace AthmarLabs.VisionCount
             CustomerPackageManifest manifest,
             RuntimeCustomerConfiguration configuration,
             SkuCatalogue catalogue,
-            string directoryPath)
+            string directoryPath,
+            BulkProductCatalogue bulkCatalogue = null,
+            BulkEmbeddingIndex bulkEmbeddingIndex = null)
         {
             Manifest = manifest ?? throw new ArgumentNullException(nameof(manifest));
             Configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
             Catalogue = catalogue ?? throw new ArgumentNullException(nameof(catalogue));
             DirectoryPath = directoryPath ?? throw new ArgumentNullException(nameof(directoryPath));
+            BulkCatalogue = bulkCatalogue;
+            BulkEmbeddingIndex = bulkEmbeddingIndex;
         }
 
         public CustomerPackageManifest Manifest { get; }
         public RuntimeCustomerConfiguration Configuration { get; }
         public SkuCatalogue Catalogue { get; }
+        public BulkProductCatalogue BulkCatalogue { get; }
+        public BulkEmbeddingIndex BulkEmbeddingIndex { get; }
         public string DirectoryPath { get; }
+        public bool HasBulkRecognitionData => BulkCatalogue != null && BulkEmbeddingIndex != null;
     }
 
     public sealed class CustomerPackageStore
@@ -30,6 +37,8 @@ namespace AthmarLabs.VisionCount
         public const string ManifestFileName = "manifest.json";
         public const string ModelFileName = "production.sentis";
         public const string CatalogueFileName = "sku_catalogue.csv";
+        public const string BulkCatalogueFileName = "bulk_products.csv";
+        public const string BulkEmbeddingIndexFileName = "bulk_embeddings.bin";
 
         private readonly string _rootDirectory;
 
@@ -73,8 +82,50 @@ namespace AthmarLabs.VisionCount
             VerifyFileSha256(modelPath, manifest.modelSha256, ModelFileName);
             VerifyFileSha256(cataloguePath, manifest.catalogueSha256, CatalogueFileName);
             var catalogue = SkuCatalogue.Parse(File.ReadAllText(cataloguePath, Encoding.UTF8));
+
+            BulkProductCatalogue bulkCatalogue = null;
+            BulkEmbeddingIndex bulkEmbeddingIndex = null;
+            if (manifest.HasBulkCatalogue)
+            {
+                var bulkCataloguePath = Path.Combine(directoryPath, BulkCatalogueFileName);
+                var bulkEmbeddingPath = Path.Combine(directoryPath, BulkEmbeddingIndexFileName);
+                RequireNonEmptyFile(bulkCataloguePath, BulkCatalogueFileName);
+                RequireNonEmptyFile(bulkEmbeddingPath, BulkEmbeddingIndexFileName);
+                VerifyFileSha256(bulkCataloguePath, manifest.bulkCatalogueSha256, BulkCatalogueFileName);
+                VerifyFileSha256(bulkEmbeddingPath, manifest.bulkEmbeddingIndexSha256, BulkEmbeddingIndexFileName);
+
+                bulkCatalogue = BulkProductCatalogue.Parse(File.ReadAllText(bulkCataloguePath, Encoding.UTF8));
+                bulkEmbeddingIndex = BulkEmbeddingIndex.Load(bulkEmbeddingPath);
+                if (!string.Equals(
+                        bulkEmbeddingIndex.ModelId,
+                        manifest.bulkEmbeddingModelId,
+                        StringComparison.Ordinal))
+                {
+                    throw new InvalidDataException("The bulk embedding index model id does not match the customer manifest.");
+                }
+                if (!string.Equals(
+                        manifest.bulkEmbeddingModelId,
+                        SentisProductEmbeddingExtractor.ModelId,
+                        StringComparison.Ordinal))
+                {
+                    throw new InvalidDataException(
+                        "The customer package embedding model id is incompatible with this application build.");
+                }
+
+                bulkEmbeddingIndex.ValidateAgainst(
+                    bulkCatalogue,
+                    SentisProductEmbeddingExtractor.ModelId,
+                    SentisProductEmbeddingExtractor.FeatureDimension);
+            }
+
             var configuration = manifest.CreateConfiguration(modelPath);
-            return new CustomerPackageSnapshot(manifest, configuration, catalogue, directoryPath);
+            return new CustomerPackageSnapshot(
+                manifest,
+                configuration,
+                catalogue,
+                directoryPath,
+                bulkCatalogue,
+                bulkEmbeddingIndex);
         }
 
         public bool TryLoadActive(out CustomerPackageSnapshot snapshot, out string error)
@@ -176,7 +227,7 @@ namespace AthmarLabs.VisionCount
                 throw new InvalidDataException($"{displayName} failed SHA-256 verification.");
         }
 
-        private static void VerifyFileSha256(string path, string expectedSha256, string displayName)
+        public static void VerifyFileSha256(string path, string expectedSha256, string displayName)
         {
             var expected = CustomerPackageManifest.NormalizeSha256(expectedSha256, displayName + " SHA-256");
             var actual = ComputeFileSha256(path);
