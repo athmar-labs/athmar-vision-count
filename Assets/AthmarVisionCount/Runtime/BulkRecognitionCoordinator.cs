@@ -9,6 +9,7 @@ namespace AthmarLabs.VisionCount
     {
         private VisionInferenceRunner _inference;
         private BulkDetectionRecognizer _recognizer;
+        private BarcodeEvidenceSidecar _barcodeSidecar;
         private ProductEnrollmentStore _manualStore;
         private BulkProductCatalogue _bulkCatalogue;
         private string _customerCode = string.Empty;
@@ -53,9 +54,27 @@ namespace AthmarLabs.VisionCount
                     snapshot.Manifest.bulkMinimumMargin,
                     snapshot.Manifest.bulkCandidateLimit);
 
+                if (snapshot.Manifest.BarcodeEvidenceEnabled)
+                {
+                    var scanner = BarcodeEvidenceScannerFactory.Create();
+                    if (scanner.IsAvailable)
+                    {
+                        _barcodeSidecar = new BarcodeEvidenceSidecar(scanner);
+                        Debug.Log("Barcode evidence sidecar enabled by manifest v2. Visual inference remains primary and unchanged.");
+                    }
+                    else
+                    {
+                        scanner.Dispose();
+                        Debug.LogWarning("Barcode evidence was enabled by manifest but is unavailable on this device; visual recognition continues unchanged.");
+                    }
+                }
+
                 _manualStore = new ProductEnrollmentStore(_customerCode);
                 var manualHardCases = SafeLoadManualHardCases();
-                _recognizer = new BulkDetectionRecognizer(resolver, manualHardCases);
+                _recognizer = new BulkDetectionRecognizer(
+                    resolver,
+                    manualHardCases,
+                    barcodeSidecar: _barcodeSidecar);
                 _inference.SetDetectionPostProcessor(PostProcessDetections);
 
                 detectorCatalogue?.SetFallbackDisplayNameResolver(ResolveBulkDisplayName);
@@ -82,7 +101,10 @@ namespace AthmarLabs.VisionCount
                 _inference.SetDetectionPostProcessor(null);
             if (_recognizer != null)
                 _recognizer.Dispose();
+            if (_barcodeSidecar != null)
+                _barcodeSidecar.Dispose();
             _recognizer = null;
+            _barcodeSidecar = null;
             _manualStore = null;
             _bulkCatalogue = null;
             _customerCode = string.Empty;
