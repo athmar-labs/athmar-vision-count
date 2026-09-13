@@ -15,6 +15,7 @@ namespace AthmarLabs.VisionCount
         private readonly ProductEvidenceResolver _resolver;
         private readonly IProductEmbeddingExtractor _embeddingExtractor;
         private readonly int _maximumProductsPerFrame;
+        private readonly BarcodeEvidenceSidecar _barcodeSidecar;
         private ProductEnrollmentCatalogueData _manualHardCases;
         private bool _disposed;
 
@@ -22,7 +23,8 @@ namespace AthmarLabs.VisionCount
             ProductEvidenceResolver resolver,
             ProductEnrollmentCatalogueData manualHardCases,
             IProductEmbeddingExtractor embeddingExtractor = null,
-            int maximumProductsPerFrame = DefaultMaximumProductsPerFrame)
+            int maximumProductsPerFrame = DefaultMaximumProductsPerFrame,
+            BarcodeEvidenceSidecar barcodeSidecar = null)
         {
             _resolver = resolver ?? throw new ArgumentNullException(nameof(resolver));
             _manualHardCases = manualHardCases ?? new ProductEnrollmentCatalogueData
@@ -34,6 +36,7 @@ namespace AthmarLabs.VisionCount
             if (maximumProductsPerFrame < 1 || maximumProductsPerFrame > 100)
                 throw new ArgumentOutOfRangeException(nameof(maximumProductsPerFrame));
             _maximumProductsPerFrame = maximumProductsPerFrame;
+            _barcodeSidecar = barcodeSidecar;
         }
 
         public void SetManualHardCases(ProductEnrollmentCatalogueData manualHardCases)
@@ -72,6 +75,10 @@ namespace AthmarLabs.VisionCount
             }
             ordered.Sort((left, right) => right.Confidence.CompareTo(left.Confidence));
 
+            // Barcode-to-box association is deliberately enabled only when exactly one product is
+            // localized. Multi-product association remains visual-only until a separate audited
+            // association strategy is implemented.
+            var barcodeEligible = ordered.Count == 1 && _barcodeSidecar != null && _barcodeSidecar.IsAvailable;
             var limit = Math.Min(_maximumProductsPerFrame, ordered.Count);
             var recognized = new List<Detection>(limit);
             for (var index = 0; index < limit; index++)
@@ -94,10 +101,27 @@ namespace AthmarLabs.VisionCount
                         continue;
                     }
 
+                    // Keep the existing visual path unchanged. Embedding is always extracted first;
+                    // barcode evidence can only add an exact identity signal afterward.
                     var embedding = _embeddingExtractor.Extract(crop);
+                    var nowSeconds = Time.realtimeSinceStartupAsDouble;
+                    var barcode = string.Empty;
+                    if (barcodeEligible)
+                        _barcodeSidecar.TryGetBarcode(localization.Bounds, nowSeconds, out barcode);
+
                     var resolution = _resolver.Resolve(
-                        new ProductRecognitionEvidence { VisualEmbedding = embedding },
+                        new ProductRecognitionEvidence
+                        {
+                            Barcode = barcode,
+                            VisualEmbedding = embedding
+                        },
                         _manualHardCases);
+
+                    // Schedule the optional scan only after Sentis embedding and evidence resolution.
+                    // ML Kit work is asynchronous and throttled; any failure leaves visual recognition intact.
+                    if (barcodeEligible)
+                        _barcodeSidecar.ObserveSingleProductCrop(crop, localization.Bounds, nowSeconds);
+
                     if (!resolution.IsMatch || string.IsNullOrWhiteSpace(resolution.Sku))
                         continue;
 
