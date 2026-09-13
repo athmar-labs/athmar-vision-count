@@ -9,6 +9,8 @@ on:
       - "Assets/AthmarVisionCount/Android/**"
       - "Assets/AthmarVisionCount/Runtime/BarcodeEvidenceCache.cs"
       - "Assets/AthmarVisionCount/Runtime/BarcodeEvidenceScanner.cs"
+      - "Assets/AthmarVisionCount/Runtime/BulkDetectionRecognizer.cs"
+      - "Assets/AthmarVisionCount/Runtime/BulkRecognitionCoordinator.cs"
       - "Assets/AthmarVisionCount/Runtime/SentisProductEmbeddingExtractor.cs"
       - "Assets/AthmarVisionCount/Runtime/ProductEnrollmentCoordinator.cs"
       - "Assets/AthmarVisionCount/Runtime/ProductEnrollmentView.cs"
@@ -116,7 +118,7 @@ jobs:
       - name: Upload installable pilot APK
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: athmar-sentis-five-product-phone-pilot
+          name: athmar-sentis-barcode-phone-pilot
           path: |
             Build/AthmarVisionCount-SentisPilot.apk
             Build/AthmarVisionCount-SentisPilot.apk.sha256
