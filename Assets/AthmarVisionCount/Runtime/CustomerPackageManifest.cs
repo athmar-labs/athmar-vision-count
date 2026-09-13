@@ -29,6 +29,10 @@ namespace AthmarLabs.VisionCount
         public float bulkMinimumMargin = ProductEvidenceResolver.DefaultBulkMinimumMargin;
         public int bulkCandidateLimit = BulkEmbeddingIndex.DefaultCandidateLimit;
 
+        // Schema v2 feature flag. Barcode is an optional evidence sidecar only; visual inference
+        // remains active and unchanged whether this flag is true, false, unavailable, or failing.
+        public bool barcodeEvidenceEnabled;
+
         public int modelInputWidth = 640;
         public int modelInputHeight = 640;
         public string modelInputLayout = "Nchw";
@@ -48,6 +52,7 @@ namespace AthmarLabs.VisionCount
         public string syncEndpoint = string.Empty;
 
         public bool HasBulkCatalogue => schemaVersion >= 2;
+        public bool BarcodeEvidenceEnabled => HasBulkCatalogue && barcodeEvidenceEnabled;
 
         public static CustomerPackageManifest Parse(string json)
         {
@@ -102,6 +107,7 @@ namespace AthmarLabs.VisionCount
                 bulkEmbeddingIndexUrl = string.Empty;
                 bulkEmbeddingIndexSha256 = string.Empty;
                 bulkEmbeddingModelId = string.Empty;
+                barcodeEvidenceEnabled = false;
             }
 
             if (modelInputWidth < 32 || modelInputWidth > 4096 || modelInputHeight < 32 || modelInputHeight > 4096)
