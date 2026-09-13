@@ -47,6 +47,107 @@ namespace AthmarLabs.VisionCount
         public void Dispose() { }
     }
 
+    /// <summary>
+    /// Optional low-cadence barcode sidecar. It consumes an already-created product crop only after
+    /// visual embedding has run, never schedules work inside the Sentis worker, and fails open back
+    /// to the unchanged visual path. Evidence is short-lived and spatially bound to the same box.
+    /// </summary>
+    public sealed class BarcodeEvidenceSidecar : IDisposable
+    {
+        public const double DefaultScanIntervalSeconds = 1.0d;
+        public const int DefaultJpegQuality = 70;
+
+        private readonly IBarcodeEvidenceScanner _scanner;
+        private readonly BarcodeEvidenceCache _cache;
+        private readonly double _scanIntervalSeconds;
+        private double _nextScanAtSeconds;
+        private NormalizedRect _pendingBounds;
+        private bool _hasPendingBounds;
+        private bool _disposed;
+
+        public BarcodeEvidenceSidecar(
+            IBarcodeEvidenceScanner scanner,
+            double scanIntervalSeconds = DefaultScanIntervalSeconds)
+        {
+            _scanner = scanner ?? throw new ArgumentNullException(nameof(scanner));
+            if (scanIntervalSeconds < 0.25d || scanIntervalSeconds > 10d)
+                throw new ArgumentOutOfRangeException(nameof(scanIntervalSeconds));
+            _scanIntervalSeconds = scanIntervalSeconds;
+            _cache = new BarcodeEvidenceCache();
+        }
+
+        public bool IsAvailable => !_disposed && _scanner.IsAvailable;
+
+        public bool TryGetBarcode(NormalizedRect bounds, double nowSeconds, out string barcode)
+        {
+            barcode = string.Empty;
+            if (_disposed)
+                return false;
+            Pump(nowSeconds);
+            return _cache.TryGet(bounds, nowSeconds, out barcode);
+        }
+
+        public void ObserveSingleProductCrop(Texture2D crop, NormalizedRect bounds, double nowSeconds)
+        {
+            if (_disposed || crop == null)
+                return;
+
+            Pump(nowSeconds);
+            if (!_scanner.IsAvailable || _scanner.IsBusy || nowSeconds < _nextScanAtSeconds)
+                return;
+
+            try
+            {
+                var jpeg = ImageConversion.EncodeToJPG(crop, DefaultJpegQuality);
+                if (jpeg == null || jpeg.Length == 0)
+                    return;
+
+                _pendingBounds = bounds;
+                _hasPendingBounds = true;
+                _nextScanAtSeconds = nowSeconds + _scanIntervalSeconds;
+                _scanner.BeginScan(jpeg);
+            }
+            catch (Exception exception)
+            {
+                _hasPendingBounds = false;
+                _nextScanAtSeconds = nowSeconds + _scanIntervalSeconds;
+                Debug.LogWarning("Barcode sidecar skipped a scan; visual recognition continues unchanged: " + exception.Message);
+            }
+        }
+
+        private void Pump(double nowSeconds)
+        {
+            while (_scanner.TryTakeResult(out var result))
+            {
+                if (!_hasPendingBounds)
+                    continue;
+
+                var bounds = _pendingBounds;
+                _hasPendingBounds = false;
+                _cache.Clear();
+
+                if (result == null)
+                    continue;
+                if (!result.Succeeded)
+                {
+                    Debug.LogWarning("Barcode sidecar result ignored; visual recognition continues unchanged: " + result.Error);
+                    continue;
+                }
+                if (!string.IsNullOrWhiteSpace(result.Value))
+                    _cache.Record(result.Value, bounds, nowSeconds);
+            }
+        }
+
+        public void Dispose()
+        {
+            if (_disposed)
+                return;
+            _disposed = true;
+            _cache.Clear();
+            _scanner.Dispose();
+        }
+    }
+
 #if UNITY_ANDROID && !UNITY_EDITOR
     internal sealed class AndroidMlKitBarcodeEvidenceScanner : IBarcodeEvidenceScanner
     {
@@ -99,12 +200,14 @@ namespace AthmarLabs.VisionCount
             if (_disposed) return;
             _disposed = true;
             _bridge?.Dispose();
+            Interlocked.Exchange(ref _busy, 0);
             while (_results.TryDequeue(out _)) { }
         }
 
         private void Complete(BarcodeScanResult result)
         {
-            _results.Enqueue(result ?? new BarcodeScanResult(string.Empty, "Unknown barcode scanner result."));
+            if (!_disposed)
+                _results.Enqueue(result ?? new BarcodeScanResult(string.Empty, "Unknown barcode scanner result."));
             Interlocked.Exchange(ref _busy, 0);
         }
 
