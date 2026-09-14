@@ -2,10 +2,10 @@ Athmar Vision Count - Barcode Demo v2
 =====================================
 
 Manifest URL: https://raw.githubusercontent.com/athmar-labs/athmar-vision-count/bulk-catalogue-bootstrap/pilot/barcode-demo-v2/manifest.json
-Manifest SHA-256: 3b7f1565745750ed1f48c3b71aa5e8d65eae6058c2db0787e738c0a094a0518d
+Manifest SHA-256: bb2d939186f6857e3ad23b46af8065583b5b3f1adb76f61525ad677784311a4d
 
 Test barcode (EAN-13): 6281000000014
-Test barcode image: https://raw.githubusercontent.com/athmar-labs/athmar-vision-count/105573a4913f8b20bd61d2454a0f482e03b26804/pilot/barcode-demo-v2/test-barcode.png
+Test barcode image: https://raw.githubusercontent.com/athmar-labs/athmar-vision-count/16b4e5a7663e4a0e614beab49a39dfac42d9dc89/pilot/barcode-demo-v2/test-barcode.png
 Expected SKU: BARCODE-DEMO-001
 Expected name: Barcode Demo Product / منتج باركود تجريبي
 
