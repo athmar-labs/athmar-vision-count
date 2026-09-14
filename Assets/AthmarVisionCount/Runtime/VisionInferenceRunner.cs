@@ -25,6 +25,7 @@ namespace AthmarLabs.VisionCount
         private BackendType _backend;
         private float[] _cpuInputBuffer;
         private Color32[] _cpuCameraPixels;
+        private Func<IReadOnlyList<Detection>, IReadOnlyList<Detection>> _detectionPostProcessor;
         private bool _loopStarted;
         private bool _running;
         private bool _paused;
@@ -55,7 +56,19 @@ namespace AthmarLabs.VisionCount
             _catalogue = catalogue;
             _paused = startPaused;
             _activeInferenceStage = "initializing";
+
+            var bulkCoordinator = GetComponent<BulkRecognitionCoordinator>();
+            if (bulkCoordinator == null)
+                bulkCoordinator = gameObject.AddComponent<BulkRecognitionCoordinator>();
+            bulkCoordinator.Configure(config.CustomerCode, catalogue);
+
             StartCoroutine(StartPipeline());
+        }
+
+        public void SetDetectionPostProcessor(
+            Func<IReadOnlyList<Detection>, IReadOnlyList<Detection>> postProcessor)
+        {
+            _detectionPostProcessor = postProcessor;
         }
 
         public void Pause()
@@ -99,6 +112,10 @@ namespace AthmarLabs.VisionCount
             _model = null;
             _cpuInputBuffer = null;
             _cpuCameraPixels = null;
+            _detectionPostProcessor = null;
+            var bulkCoordinator = GetComponent<BulkRecognitionCoordinator>();
+            if (bulkCoordinator != null)
+                bulkCoordinator.Disable();
             _config = null;
             _catalogue = null;
             _activeInferenceStage = "stopped";
@@ -128,9 +145,6 @@ namespace AthmarLabs.VisionCount
                 yield break;
             }
 
-            // Android can grant the camera permission before Unity refreshes WebCamTexture.devices.
-            // Give the application focus and the device list time to settle instead of failing on
-            // the first empty enumeration immediately after the permission dialog closes.
             yield return null;
             _activeInferenceStage = "discover_camera";
             StatusChanged?.Invoke("discovering_camera");
@@ -165,8 +179,6 @@ namespace AthmarLabs.VisionCount
                 yield return null;
             }
 
-            // Some Android devices can open the default camera even when Unity's device enumeration
-            // remains temporarily empty. Let the actual frame timeout decide whether the fallback works.
             if (_cameraTexture == null)
             {
                 try
@@ -359,8 +371,15 @@ namespace AthmarLabs.VisionCount
             if (detections == null)
                 throw new InvalidOperationException("The YOLO decoder returned no detection collection.");
 
+            IReadOnlyList<Detection> detectionsToPublish = detections;
+            if (_detectionPostProcessor != null && detections.Count > 0)
+            {
+                _activeInferenceStage = "resolve_product_identity";
+                detectionsToPublish = _detectionPostProcessor(detections) ?? Array.Empty<Detection>();
+            }
+
             _activeInferenceStage = "publish_detections";
-            DetectionsReady?.Invoke(detections);
+            DetectionsReady?.Invoke(detectionsToPublish);
             _activeInferenceStage = "idle";
         }
 

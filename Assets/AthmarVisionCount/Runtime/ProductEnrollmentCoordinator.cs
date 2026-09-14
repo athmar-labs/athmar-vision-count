@@ -13,7 +13,9 @@ namespace AthmarLabs.VisionCount
         private VisionInferenceRunner _inference;
         private ProductEnrollmentStore _store;
         private IProductEmbeddingExtractor _embeddingExtractor;
-        private RobustProductRecognitionMatcher _matcher;
+        private RobustProductRecognitionMatcher _manualMatcher;
+        private ProductEvidenceResolver _bulkResolver;
+        private BulkProductCatalogue _bulkCatalogue;
         private bool _catalogueCompatible = true;
         private bool _subscribed;
 
@@ -25,9 +27,8 @@ namespace AthmarLabs.VisionCount
             if (_view == null)
                 _view = gameObject.AddComponent<ProductEnrollmentView>();
 
-            // Do not construct a fallback descriptor here. The neural model is loaded lazily and
-            // enrollment fails closed if the shared Sentis resource is missing or invalid.
-            _matcher = new RobustProductRecognitionMatcher();
+            // No fallback descriptor. The shared neural embedding model is the only visual feature space.
+            _manualMatcher = new RobustProductRecognitionMatcher();
             Subscribe();
         }
 
@@ -39,26 +40,48 @@ namespace AthmarLabs.VisionCount
             var normalizedCustomerCode = CustomerStorageScope.Require(customerCode);
             _store = new ProductEnrollmentStore(normalizedCustomerCode);
             _pendingReferences.Clear();
-            var catalogue = _store.Load();
-            _catalogueCompatible = CatalogueUsesCurrentEmbeddingDimension(catalogue);
-            _view.Show(normalizedCustomerCode, catalogue.products.Count);
+            var manualCatalogue = _store.Load();
+            _catalogueCompatible = CatalogueUsesCurrentEmbeddingDimension(manualCatalogue);
+
+            LoadBulkRecognition(normalizedCustomerCode, out var bulkWarning);
+            var bulkCount = _bulkCatalogue == null ? 0 : _bulkCatalogue.Count;
+            _view.Show(normalizedCustomerCode, manualCatalogue.products.Count, bulkCount);
 
             if (!_catalogueCompatible)
             {
                 _view.SetStatus(
-                    "بيانات تسجيل المنتجات الحالية أُنشئت ببصمة بصرية قديمة وغير متوافقة. " +
-                    "استخدم Delete Local Data ثم أعد تسجيل المنتجات بنموذج Sentis الجديد. / " +
-                    "Existing enrollment data uses an incompatible embedding version; delete local data and re-enroll.",
+                    "بيانات التصحيح اليدوي الحالية أُنشئت ببصمة قديمة وغير متوافقة. " +
+                    "احذف بيانات التصحيح المحلية ثم أعد فقط المنتجات الصعبة. / " +
+                    "Existing manual hard-case data uses an incompatible embedding version; clear it and re-enroll only hard products.",
                     true);
                 return;
             }
 
             if (!EnsureEmbeddingExtractor(out var error))
+            {
                 _view.SetStatus(error, true);
-            else
+                return;
+            }
+
+            if (bulkCount > 0)
+            {
                 _view.SetStatus(
-                    "نموذج AI العام جاهز. ضع منتجًا واحدًا داخل الإطار والتقط 8–15 مرجعًا. / " +
-                    "Generic Sentis AI embedding ready; capture 8–15 views of one product.");
+                    $"كتالوج Bulk جاهز: {bulkCount} منتج. لا تُصوّر الكتالوج كاملًا هنا؛ " +
+                    "استخدم هذه الشاشة فقط لإضافة منتج جديد أو تصحيح منتج صعب. / " +
+                    $"Bulk catalogue ready: {bulkCount} products. Manual capture is only for new or hard products.");
+            }
+            else if (!string.IsNullOrWhiteSpace(bulkWarning))
+            {
+                _view.SetStatus(
+                    "حزمة Bulk غير متاحة؛ التصحيح اليدوي ما زال متاحًا. / Bulk data unavailable: " + bulkWarning,
+                    true);
+            }
+            else
+            {
+                _view.SetStatus(
+                    "لا توجد حزمة Bulk v2 بعد. هذه الشاشة مخصصة لإضافة/تصحيح الحالات الصعبة فقط. / " +
+                    "No bulk v2 package is active yet; this screen is for manual hard cases only.");
+            }
         }
 
         private void Update()
@@ -115,7 +138,7 @@ namespace AthmarLabs.VisionCount
             if (_pendingReferences.Count >= ProductEnrollmentStore.MaximumReferenceCount)
             {
                 _view.SetStatus(
-                    $"تم الوصول إلى الحد الأقصى ({ProductEnrollmentStore.MaximumReferenceCount}) من الصور المرجعية.",
+                    $"تم الوصول إلى الحد الأقصى ({ProductEnrollmentStore.MaximumReferenceCount}) من المراجع.",
                     true);
                 return;
             }
@@ -147,8 +170,8 @@ namespace AthmarLabs.VisionCount
                 _view.ResetDraft();
                 _view.SetProductCount(count);
                 _view.SetStatus(
-                    $"تم حفظ {saved.sku} محليًا لهذا العميل باستخدام بصمة Sentis AI. " +
-                    "ضع المنتج أمام الكاميرا واختر Test Recognition.");
+                    $"تم حفظ {saved.sku} كتصحيح يدوي محلي لهذا العميل. " +
+                    "هذا الـoverlay سيُستخدم عندما لا يحسم Bulk/Barcode/OCR المنتج.");
             }
             catch (Exception exception)
             {
@@ -168,10 +191,10 @@ namespace AthmarLabs.VisionCount
             try
             {
                 _view.SetBusy(true);
-                var catalogue = _store.Load();
-                if (catalogue.products.Count == 0)
+                var manualCatalogue = _store.Load();
+                if (manualCatalogue.products.Count == 0 && _bulkResolver == null)
                 {
-                    _view.SetStatus("لا توجد منتجات مسجلة للاختبار / No enrolled products.", true);
+                    _view.SetStatus("لا توجد بيانات Bulk أو تصحيحات يدوية للاختبار / No recognition data available.", true);
                     return;
                 }
 
@@ -181,22 +204,46 @@ namespace AthmarLabs.VisionCount
                     return;
                 }
 
-                var result = _matcher.Match(query, catalogue);
-                if (!result.IsMatch)
+                if (_bulkResolver != null)
                 {
-                    var reason = result.IsAmbiguous
-                        ? "النتيجة متقاربة بين أكثر من منتج"
-                        : "لم تتفق عدة صور مرجعية على المنتج أو كان التشابه أقل من الحد المطلوب";
+                    var resolution = _bulkResolver.Resolve(
+                        new ProductRecognitionEvidence { VisualEmbedding = query },
+                        manualCatalogue);
+                    if (!resolution.IsMatch)
+                    {
+                        var reason = resolution.IsAmbiguous
+                            ? "تعارض أو تقارب بين أكثر من مرشح"
+                            : "لم يصل الدليل إلى حد القبول";
+                        _view.SetStatus(
+                            $"غير معروف / Unknown — {reason}. " +
+                            $"score={resolution.Score:0.000}, runner-up={resolution.RunnerUpScore:0.000}",
+                            true);
+                        return;
+                    }
+
+                    var displayName = ResolveDisplayName(manualCatalogue, resolution.Sku);
+                    _view.SetStatus(
+                        $"تم التعرف: {displayName} [{resolution.Sku}] — " +
+                        $"source={resolution.Source}, score={resolution.Score:0.000}");
+                    return;
+                }
+
+                var manual = _manualMatcher.Match(query, manualCatalogue);
+                if (!manual.IsMatch)
+                {
+                    var reason = manual.IsAmbiguous
+                        ? "النتيجة متقاربة بين أكثر من منتج يدوي"
+                        : "لم تتفق عدة مراجع يدوية أو كان التشابه أقل من الحد";
                     _view.SetStatus(
                         $"غير معروف / Unknown — {reason}. " +
-                        $"consensus={result.Similarity:0.000}, runner-up={result.RunnerUpSimilarity:0.000}",
+                        $"consensus={manual.Similarity:0.000}, runner-up={manual.RunnerUpSimilarity:0.000}",
                         true);
                     return;
                 }
 
-                var displayName = ResolveDisplayName(catalogue, result.Sku);
                 _view.SetStatus(
-                    $"تم التعرف: {displayName} [{result.Sku}] — consensus={result.Similarity:0.000}");
+                    $"تم التعرف: {ResolveDisplayName(manualCatalogue, manual.Sku)} [{manual.Sku}] — " +
+                    $"source=ManualHardCase, consensus={manual.Similarity:0.000}");
             }
             catch (Exception exception)
             {
@@ -208,11 +255,49 @@ namespace AthmarLabs.VisionCount
             }
         }
 
+        private void LoadBulkRecognition(string customerCode, out string warning)
+        {
+            warning = string.Empty;
+            _bulkResolver = null;
+            _bulkCatalogue = null;
+
+            try
+            {
+                var packageStore = new CustomerPackageStore();
+                if (!packageStore.TryLoadActive(out var snapshot, out var error))
+                {
+                    warning = error;
+                    return;
+                }
+                if (!string.Equals(snapshot.Configuration.CustomerCode, customerCode, StringComparison.Ordinal))
+                {
+                    warning = "Active package belongs to another customer.";
+                    return;
+                }
+                if (!snapshot.HasBulkRecognitionData)
+                    return;
+
+                _bulkCatalogue = snapshot.BulkCatalogue;
+                _bulkResolver = new ProductEvidenceResolver(
+                    snapshot.BulkCatalogue,
+                    snapshot.BulkEmbeddingIndex,
+                    snapshot.Manifest.bulkMinimumSimilarity,
+                    snapshot.Manifest.bulkMinimumMargin,
+                    snapshot.Manifest.bulkCandidateLimit);
+            }
+            catch (Exception exception)
+            {
+                warning = exception.Message;
+                _bulkResolver = null;
+                _bulkCatalogue = null;
+            }
+        }
+
         private void ClearDraft()
         {
             _pendingReferences.Clear();
             _view.ResetDraft();
-            _view.SetStatus("تم مسح بيانات المنتج والبصمات المؤقتة / Draft cleared");
+            _view.SetStatus("تم مسح بيانات التصحيح المؤقتة / Hard-case draft cleared");
         }
 
         private void Close()
@@ -233,7 +318,7 @@ namespace AthmarLabs.VisionCount
             if (!_catalogueCompatible)
             {
                 _view.SetStatus(
-                    "بيانات التسجيل القديمة غير متوافقة مع نموذج Sentis الحالي. احذف البيانات المحلية وأعد التسجيل.",
+                    "بيانات التصحيح اليدوي القديمة غير متوافقة مع نموذج Sentis الحالي. احذفها وأعد الحالات الصعبة فقط.",
                     true);
                 return false;
             }
@@ -260,7 +345,7 @@ namespace AthmarLabs.VisionCount
             }
             catch (Exception exception)
             {
-                error = "تعذر تحميل نموذج AI العام للتسجيل / Generic Sentis embedding unavailable: " + exception.Message;
+                error = "تعذر تحميل نموذج AI العام / Generic Sentis embedding unavailable: " + exception.Message;
                 return false;
             }
         }
@@ -326,18 +411,24 @@ namespace AthmarLabs.VisionCount
             return true;
         }
 
-        private static string ResolveDisplayName(ProductEnrollmentCatalogueData catalogue, string sku)
+        private string ResolveDisplayName(ProductEnrollmentCatalogueData manualCatalogue, string sku)
         {
-            for (var index = 0; index < catalogue.products.Count; index++)
+            if (_bulkCatalogue != null && _bulkCatalogue.TryGetBySku(sku, out var bulkProduct))
+                return bulkProduct.GetDisplayName("ar");
+
+            if (manualCatalogue?.products != null)
             {
-                var product = catalogue.products[index];
-                if (product == null || !string.Equals(product.sku, sku, StringComparison.OrdinalIgnoreCase))
-                    continue;
-                if (!string.IsNullOrWhiteSpace(product.nameArabic))
-                    return product.nameArabic;
-                if (!string.IsNullOrWhiteSpace(product.nameEnglish))
-                    return product.nameEnglish;
-                return product.sku;
+                for (var index = 0; index < manualCatalogue.products.Count; index++)
+                {
+                    var product = manualCatalogue.products[index];
+                    if (product == null || !string.Equals(product.sku, sku, StringComparison.OrdinalIgnoreCase))
+                        continue;
+                    if (!string.IsNullOrWhiteSpace(product.nameArabic))
+                        return product.nameArabic;
+                    if (!string.IsNullOrWhiteSpace(product.nameEnglish))
+                        return product.nameEnglish;
+                    return product.sku;
+                }
             }
             return sku;
         }
@@ -348,6 +439,8 @@ namespace AthmarLabs.VisionCount
             if (_embeddingExtractor is IDisposable disposable)
                 disposable.Dispose();
             _embeddingExtractor = null;
+            _bulkResolver = null;
+            _bulkCatalogue = null;
         }
     }
 

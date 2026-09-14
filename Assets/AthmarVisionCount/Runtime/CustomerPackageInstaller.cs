@@ -11,6 +11,9 @@ namespace AthmarLabs.VisionCount
     [DisallowMultipleComponent]
     public sealed class CustomerPackageInstaller : MonoBehaviour
     {
+        private const long MaximumBulkCatalogueBytes = 64L * 1024L * 1024L;
+        private const long MaximumBulkEmbeddingBytes = 256L * 1024L * 1024L;
+
         public event Action<string> ProgressChanged;
         public event Action<CustomerPackageSnapshot> InstallationCompleted;
         public event Action<string> InstallationFailed;
@@ -85,33 +88,155 @@ namespace AthmarLabs.VisionCount
                 yield break;
             }
 
-            ProgressChanged?.Invoke("Downloading and verifying SKU catalogue...");
+            ProgressChanged?.Invoke("Downloading and verifying detector catalogue...");
             byte[] catalogueBytes;
             using (var request = UnityWebRequest.Get(manifest.catalogueUrl))
             {
                 request.timeout = 60;
                 yield return request.SendWebRequest();
-                if (!TryReadDownload(request, "SKU catalogue", store, out catalogueBytes))
+                if (!TryReadDownload(request, "detector SKU catalogue", store, out catalogueBytes))
                     yield break;
             }
 
             try
             {
-                CustomerPackageStore.VerifyBytesSha256(catalogueBytes, manifest.catalogueSha256, "SKU catalogue");
+                CustomerPackageStore.VerifyBytesSha256(catalogueBytes, manifest.catalogueSha256, "Detector SKU catalogue");
                 var cataloguePath = Path.Combine(stagingDirectory, CustomerPackageStore.CatalogueFileName);
                 File.WriteAllBytes(cataloguePath, catalogueBytes);
                 SkuCatalogue.Parse(Encoding.UTF8.GetString(catalogueBytes));
+            }
+            catch (Exception exception)
+            {
+                Fail(store, exception);
+                yield break;
+            }
 
-                ProgressChanged?.Invoke("Validating model compatibility...");
+            if (manifest.HasBulkCatalogue)
+            {
+                ProgressChanged?.Invoke("Downloading bulk product catalogue...");
+                var bulkCataloguePath = Path.Combine(stagingDirectory, CustomerPackageStore.BulkCatalogueFileName);
+                var bulkCatalogueDownloaded = false;
+                yield return DownloadLargeFile(
+                    manifest.bulkCatalogueUrl,
+                    bulkCataloguePath,
+                    "bulk product catalogue",
+                    120,
+                    MaximumBulkCatalogueBytes,
+                    store,
+                    success => bulkCatalogueDownloaded = success);
+                if (!bulkCatalogueDownloaded)
+                    yield break;
+
+                try
+                {
+                    CustomerPackageStore.VerifyFileSha256(
+                        bulkCataloguePath,
+                        manifest.bulkCatalogueSha256,
+                        "Bulk product catalogue");
+                    BulkProductCatalogue.Parse(File.ReadAllText(bulkCataloguePath, Encoding.UTF8));
+                }
+                catch (Exception exception)
+                {
+                    Fail(store, exception);
+                    yield break;
+                }
+
+                ProgressChanged?.Invoke("Downloading compact product embedding index...");
+                var embeddingPath = Path.Combine(stagingDirectory, CustomerPackageStore.BulkEmbeddingIndexFileName);
+                var embeddingDownloaded = false;
+                yield return DownloadLargeFile(
+                    manifest.bulkEmbeddingIndexUrl,
+                    embeddingPath,
+                    "bulk embedding index",
+                    600,
+                    MaximumBulkEmbeddingBytes,
+                    store,
+                    success => embeddingDownloaded = success);
+                if (!embeddingDownloaded)
+                    yield break;
+
+                try
+                {
+                    CustomerPackageStore.VerifyFileSha256(
+                        embeddingPath,
+                        manifest.bulkEmbeddingIndexSha256,
+                        "Bulk embedding index");
+                }
+                catch (Exception exception)
+                {
+                    Fail(store, exception);
+                    yield break;
+                }
+            }
+
+            try
+            {
+                ProgressChanged?.Invoke("Validating model and customer package compatibility...");
                 ModelLoader.Load(modelPath);
+                // ValidateDirectory verifies all hashes again and rejects vector/model mismatches
+                // before the staged package can become active.
+                store.ValidateDirectory(stagingDirectory);
                 var activated = store.ActivateStaging();
                 _installing = false;
-                ProgressChanged?.Invoke("Customer package activated.");
+                ProgressChanged?.Invoke(
+                    activated.HasBulkRecognitionData
+                        ? $"Customer package activated with {activated.BulkCatalogue.Count} bulk products."
+                        : "Customer package activated.");
                 InstallationCompleted?.Invoke(activated);
             }
             catch (Exception exception)
             {
                 Fail(store, exception);
+            }
+        }
+
+        private IEnumerator DownloadLargeFile(
+            string url,
+            string destinationPath,
+            string displayName,
+            int timeoutSeconds,
+            long maximumBytes,
+            CustomerPackageStore store,
+            Action<bool> completed)
+        {
+            var succeeded = false;
+            try
+            {
+                using var request = UnityWebRequest.Get(url);
+                request.timeout = timeoutSeconds;
+                request.downloadHandler = new DownloadHandlerFile(destinationPath)
+                {
+                    removeFileOnAbort = true
+                };
+                yield return request.SendWebRequest();
+
+                if (request.result != UnityWebRequest.Result.Success)
+                {
+                    Fail(store, new IOException($"Unable to download {displayName}: {request.error}"));
+                    yield break;
+                }
+
+                if (!File.Exists(destinationPath))
+                {
+                    Fail(store, new IOException($"Downloaded {displayName} was not written to disk."));
+                    yield break;
+                }
+
+                var length = new FileInfo(destinationPath).Length;
+                if (length <= 0 || length > maximumBytes)
+                {
+                    Fail(
+                        store,
+                        new IOException(
+                            $"Downloaded {displayName} size {length} bytes is outside the allowed range (1-{maximumBytes})."));
+                    yield break;
+                }
+
+                succeeded = true;
+            }
+            finally
+            {
+                completed?.Invoke(succeeded);
             }
         }
 

@@ -33,6 +33,7 @@ namespace AthmarLabs.VisionCount
         private Button _closeButton;
         private int _referenceCount;
         private int _productCount;
+        private int _bulkProductCount;
         private bool _busy;
 
         public bool IsVisible => _panel != null && _panel.activeSelf;
@@ -42,18 +43,19 @@ namespace AthmarLabs.VisionCount
             EnsureInterfaceBuilt();
         }
 
-        public void Show(string customerCode, int productCount)
+        public void Show(string customerCode, int productCount, int bulkProductCount = 0)
         {
             EnsureInterfaceBuilt();
             _panel.SetActive(true);
             _panel.transform.SetAsLastSibling();
             _customerText.text = "العميل / Customer: " + (customerCode ?? string.Empty);
             _productCount = Math.Max(0, productCount);
+            _bulkProductCount = Math.Max(0, bulkProductCount);
             ResetDraft();
-            SetProductCount(_productCount);
+            UpdateProgress();
             SetStatus(
-                "اجعل منتجًا واحدًا يملأ معظم معاينة الكاميرا، ثم التقط 8–15 مرجعًا من زوايا ومسافات مختلفة. " +
-                "الصور الخام لا تُحفظ.");
+                "هذه الشاشة ليست لإدخال الكتالوج كاملًا. استخدمها فقط لمنتج جديد أو حالة صعبة بعد Bulk Bootstrap. " +
+                "ضع منتجًا واحدًا داخل الإطار والتقط 8–15 مرجعًا. الصور الخام لا تُحفظ.");
             SetBusy(false);
         }
 
@@ -93,6 +95,12 @@ namespace AthmarLabs.VisionCount
             UpdateProgress();
         }
 
+        public void SetBulkProductCount(int bulkProductCount)
+        {
+            _bulkProductCount = Math.Max(0, bulkProductCount);
+            UpdateProgress();
+        }
+
         public void ResetDraft()
         {
             EnsureInterfaceBuilt();
@@ -124,9 +132,10 @@ namespace AthmarLabs.VisionCount
                 return;
 
             _referenceText.text =
-                $"الصور المرجعية / References: {_referenceCount} " +
+                $"المراجع اليدوية / References: {_referenceCount} " +
                 $"(min {ProductEnrollmentStore.MinimumReferenceCount}, max {ProductEnrollmentStore.MaximumReferenceCount})";
-            _productCountText.text = $"المنتجات المسجلة / Enrolled products: {_productCount}";
+            _productCountText.text =
+                $"Bulk catalogue: {_bulkProductCount}  |  Manual hard cases: {_productCount}";
             UpdateButtonState();
         }
 
@@ -140,7 +149,7 @@ namespace AthmarLabs.VisionCount
                 !_busy &&
                 _referenceCount >= ProductEnrollmentStore.MinimumReferenceCount &&
                 _referenceCount <= ProductEnrollmentStore.MaximumReferenceCount;
-            _testButton.interactable = !_busy && _productCount > 0;
+            _testButton.interactable = !_busy && (_productCount > 0 || _bulkProductCount > 0);
             _clearButton.interactable = !_busy;
             _closeButton.interactable = !_busy;
         }
@@ -189,7 +198,7 @@ namespace AthmarLabs.VisionCount
             _panel = panelRect.gameObject;
 
             var title = CreateText("Title", panelRect, 34, FontStyle.Bold, TextAnchor.MiddleCenter);
-            title.text = "إضافة المنتجات ذاتيًا / Self-Service Product Enrollment";
+            title.text = "إضافة/تصحيح منتج صعب / Manual Hard-Case Product";
             Place(title.rectTransform, 0.04f, 0.945f, 0.96f, 0.99f);
 
             _customerText = CreateText("Customer", panelRect, 21, FontStyle.Normal, TextAnchor.MiddleCenter);
@@ -216,7 +225,7 @@ namespace AthmarLabs.VisionCount
             Stretch(cameraHint.rectTransform);
             cameraHint.rectTransform.offsetMin = new Vector2(14f, 10f);
             cameraHint.rectTransform.offsetMax = new Vector2(-14f, -10f);
-            cameraHint.text = "ضع منتجًا واحدًا داخل الإطار / Keep one product centered";
+            cameraHint.text = "منتج جديد/صعب واحد داخل الإطار / One new or hard product";
             cameraHint.raycastTarget = false;
 
             var formRect = CreateRect("ProductForm", panelRect);
@@ -253,7 +262,7 @@ namespace AthmarLabs.VisionCount
             Place(_captureButton.GetComponent<RectTransform>(), 0.06f, 0.15f, 0.49f, 0.21f);
             _captureButton.onClick.AddListener(() => CaptureReferenceRequested?.Invoke());
 
-            _saveButton = CreateButton("SaveProduct", panelRect, "حفظ المنتج / Save");
+            _saveButton = CreateButton("SaveProduct", panelRect, "حفظ التصحيح / Save Override");
             Place(_saveButton.GetComponent<RectTransform>(), 0.51f, 0.15f, 0.94f, 0.21f);
             _saveButton.onClick.AddListener(HandleSave);
 
