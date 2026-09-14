@@ -13,7 +13,7 @@
   "bulkCatalogueUrl": "https://raw.githubusercontent.com/athmar-labs/athmar-vision-count/16b4e5a7663e4a0e614beab49a39dfac42d9dc89/pilot/barcode-demo-v2/bulk_products.csv",
   "bulkCatalogueSha256": "750f40cff28b1cf392c54407642918e4478c3d999eb1391bedefaab7db412b3f",
   "bulkEmbeddingIndexUrl": "https://raw.githubusercontent.com/athmar-labs/athmar-vision-count/16b4e5a7663e4a0e614beab49a39dfac42d9dc89/pilot/barcode-demo-v2/bulk_embeddings.bin",
-  "bulkEmbeddingIndexSha256": "91a8e6801d3cbca59241b3173677246d165f8d43b0e0698757ff69258fcba0a1",
+  "bulkEmbeddingIndexSha256": "5d60e3cd427dede6b9eac269b0e71f603feeb1374087918ff857bfe3eda419c6",
   "bulkEmbeddingModelId": "timm/mobilenetv3_small_075.lamb_in1k@fa65a043c25690a5779ff856052a5ae55ec03eda",
   "bulkMinimumSimilarity": 1.0,
   "bulkMinimumMargin": 0.04,
