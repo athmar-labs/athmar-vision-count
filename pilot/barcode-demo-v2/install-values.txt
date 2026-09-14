@@ -2,17 +2,19 @@ Athmar Vision Count - Barcode Demo v2
 =====================================
 
 Manifest URL: https://raw.githubusercontent.com/athmar-labs/athmar-vision-count/bulk-catalogue-bootstrap/pilot/barcode-demo-v2/manifest.json
-Manifest SHA-256: 22ee54c5dc1bff4960e96316b4f8c066a072d46aeb0009343a204fe11e511471
+Manifest SHA-256: 3b7f1565745750ed1f48c3b71aa5e8d65eae6058c2db0787e738c0a094a0518d
 
 Test barcode (EAN-13): 6281000000014
-Test barcode image: https://raw.githubusercontent.com/athmar-labs/athmar-vision-count/2eeef90a1e5ea44e44951f3b7e4a15261dd3e188/pilot/barcode-demo-v2/test-barcode.png
+Test barcode image: https://raw.githubusercontent.com/athmar-labs/athmar-vision-count/105573a4913f8b20bd61d2454a0f482e03b26804/pilot/barcode-demo-v2/test-barcode.png
 Expected SKU: BARCODE-DEMO-001
 Expected name: Barcode Demo Product / منتج باركود تجريبي
 
 Phone steps:
-1. Open Administration and enter the administrator PIN.
-2. Paste Manifest URL and Manifest SHA-256 above.
-3. Tap Verify & Install.
-4. After ATHMAR-BARCODE-DEMO is active, tap Close to return to the scanner.
-5. Show exactly one product/barcode in view and scan the test EAN-13 barcode.
-6. Barcode is an optional on-device sidecar; visual scanning must continue if barcode evidence is absent.
+1. Keep the installed Athmar Barcode Pilot APK; no APK reinstall is required for this package-only update.
+2. Open Administration and enter the administrator PIN.
+3. Paste Manifest URL and Manifest SHA-256 above.
+4. Tap Verify & Install.
+5. Confirm Active customer becomes ATHMAR-BARCODE-DEMO, then tap Close.
+6. Display the test barcode on another screen or print it; keep exactly one barcode/product in view.
+7. Expected barcode identity: BARCODE-DEMO-001 / منتج باركود تجريبي.
+8. Barcode remains an optional on-device sidecar. Visual scanning must continue when no barcode is available.
