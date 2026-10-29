@@ -1,0 +1,20 @@
+Athmar Vision Count - Barcode Demo v2
+=====================================
+
+Manifest URL: https://raw.githubusercontent.com/athmar-labs/athmar-vision-count/bulk-catalogue-bootstrap/pilot/barcode-demo-v2/manifest.json
+Manifest SHA-256: c7230076ca84c3b25bdc884b1779c68d48ab76de05ff4bddfc7ae537d5c1a1c2
+
+Test barcode (EAN-13): 6281000000014
+Test barcode image: https://raw.githubusercontent.com/athmar-labs/athmar-vision-count/16b4e5a7663e4a0e614beab49a39dfac42d9dc89/pilot/barcode-demo-v2/test-barcode.png
+Expected SKU: BARCODE-DEMO-001
+Expected name: Barcode Demo Product / منتج باركود تجريبي
+
+Phone steps:
+1. Keep the installed Athmar Barcode Pilot APK; no APK reinstall is required for this package-only update.
+2. Open Administration and enter the administrator PIN.
+3. Paste Manifest URL and Manifest SHA-256 above.
+4. Tap Verify & Install.
+5. Confirm Active customer becomes ATHMAR-BARCODE-DEMO, then tap Close.
+6. Display the test barcode on another screen or print it; keep exactly one barcode/product in view.
+7. Expected barcode identity: BARCODE-DEMO-001 / منتج باركود تجريبي.
+8. Barcode remains an optional on-device sidecar. Visual scanning must continue when no barcode is available.

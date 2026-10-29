@@ -1,4 +1,5 @@
 using System;
+using System.IO;
 using System.Security.Cryptography;
 using System.Text;
 using UnityEngine;
@@ -45,13 +46,24 @@ namespace AthmarLabs.VisionCount
         {
             try
             {
-                var store = new CustomerPackageStore();
-                if (store.TryLoadActive(out var snapshot, out _))
-                    return Normalize(snapshot.Configuration.CustomerCode);
+                // Do not call CustomerPackageStore.TryLoadActive here: schema-v2 packages may carry
+                // 100k vectors and storage scoping only needs the tiny manifest/customerCode.
+                var manifestPath = Path.Combine(
+                    Application.persistentDataPath,
+                    "customer-packages",
+                    "active",
+                    CustomerPackageStore.ManifestFileName);
+                if (File.Exists(manifestPath))
+                {
+                    var manifest = CustomerPackageManifest.Parse(File.ReadAllText(manifestPath, Encoding.UTF8));
+                    var activeCode = Normalize(manifest.customerCode);
+                    if (activeCode.Length > 0)
+                        return activeCode;
+                }
             }
             catch (Exception exception)
             {
-                Debug.LogWarning("Unable to resolve active customer package for local storage: " + exception.Message);
+                Debug.LogWarning("Unable to resolve active customer manifest for local storage: " + exception.Message);
             }
 
             var config = Resources.Load<AppConfig>(ConfigResourceName);

@@ -37,6 +37,7 @@ namespace AthmarLabs.VisionCount
         private readonly Dictionary<int, SkuDefinition> _byLabelIndex;
         private readonly Dictionary<string, SkuDefinition> _bySku;
         private readonly List<SkuDefinition> _entries;
+        private Func<string, string, string> _fallbackDisplayNameResolver;
 
         private SkuCatalogue(
             Dictionary<int, SkuDefinition> byLabelIndex,
@@ -62,9 +63,23 @@ namespace AthmarLabs.VisionCount
             return !string.IsNullOrWhiteSpace(sku) && _bySku.TryGetValue(sku.Trim(), out definition);
         }
 
+        public void SetFallbackDisplayNameResolver(Func<string, string, string> resolver)
+        {
+            _fallbackDisplayNameResolver = resolver;
+        }
+
         public string ResolveDisplayName(string sku, string language)
         {
-            return TryGetBySku(sku, out var definition) ? definition.GetDisplayName(language) : sku;
+            if (TryGetBySku(sku, out var definition))
+                return definition.GetDisplayName(language);
+
+            if (_fallbackDisplayNameResolver != null)
+            {
+                var resolved = _fallbackDisplayNameResolver(sku, language);
+                if (!string.IsNullOrWhiteSpace(resolved))
+                    return resolved.Trim();
+            }
+            return sku;
         }
 
         public static SkuCatalogue Parse(string csv)

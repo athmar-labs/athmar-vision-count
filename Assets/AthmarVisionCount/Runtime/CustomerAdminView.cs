@@ -90,8 +90,8 @@ namespace AthmarLabs.VisionCount
                 : "العميل الحالي / Active customer: " + _activeCustomerCode;
             _statusText.color = Color.white;
             _statusText.text = _hasActiveCustomer
-                ? "يمكنك إضافة منتجات هذا العميل من داخل التطبيق أو تحديث حزمة الرؤية."
-                : "ثبّت حزمة العميل أولًا، ثم أضف منتجاته من داخل التطبيق.";
+                ? "حدّث حزمة Bulk للكتالوج الكامل. استخدم التصحيح اليدوي فقط للمنتج الجديد أو الصعب."
+                : "ثبّت حزمة العميل أولًا؛ حزمة v2 يمكن أن تحمل آلاف المنتجات وEmbeddings الجاهزة.";
             _closeButton.gameObject.SetActive(!_configurationRequired || _hasActiveCustomer);
             SetBusy(false);
         }
@@ -190,7 +190,7 @@ namespace AthmarLabs.VisionCount
             _packageSection = packageRect.gameObject;
 
             var packageTitle = CreateText("PackageTitle", packageRect, 27, FontStyle.Bold, TextAnchor.MiddleCenter);
-            packageTitle.text = "حزمة الرؤية ومنتجات العميل / Vision Package & Customer Products";
+            packageTitle.text = "حزمة Bulk والرؤية / Bulk Catalogue & Vision Package";
             Place(packageTitle.rectTransform, 0.04f, 0.84f, 0.96f, 0.98f);
 
             _manifestUrlInput = CreateInputField("ManifestUrl", packageRect, "رابط Manifest HTTPS");
@@ -215,7 +215,7 @@ namespace AthmarLabs.VisionCount
             _manageProductsButton = CreateButton(
                 "ManageProducts",
                 packageRect,
-                "إضافة المنتجات ذاتيًا / Self-Service Products",
+                "إضافة/تصحيح منتج صعب / Manual Hard-Case Product",
                 out _);
             Place(_manageProductsButton.GetComponent<RectTransform>(), 0.05f, 0.06f, 0.95f, 0.21f);
             _manageProductsButton.onClick.AddListener(OpenProductEnrollment);
