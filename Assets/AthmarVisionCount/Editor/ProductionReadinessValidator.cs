@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Security.Cryptography;
+using Unity.InferenceEngine;
 using UnityEditor;
 using UnityEditor.Build;
 using UnityEditor.Build.Reporting;
@@ -14,6 +15,7 @@ namespace AthmarLabs.VisionCount.Editor
     {
         private const string RequiredUnityVersion = "6000.3.10f1";
         private const string RequiredConfigFileName = "AthmarVisionCountConfig.asset";
+        private const string GenericEmbeddingModelPath = "Assets/Generated/Resources/AthmarGenericEmbedding.onnx";
 
         [MenuItem("Athmar/Vision Count/Validate Production Readiness")]
         public static void ValidateFromMenu()
@@ -41,6 +43,7 @@ namespace AthmarLabs.VisionCount.Editor
         public static void BuildAndroidRelease()
         {
             ProjectBootstrapper.EnsureProductionProject();
+            RequireGenericEmbeddingModelForRelease();
             ValidateOrThrow();
 
             var keystorePath = RequireFirstEnvironment("ANDROID_KEYSTORE_PATH", "ANDROID_KEYSTORE_NAME");
@@ -114,6 +117,32 @@ namespace AthmarLabs.VisionCount.Editor
                 PlayerSettings.Android.keyaliasName = previousAliasName;
                 PlayerSettings.Android.keyaliasPass = previousAliasPassword;
                 EditorUserBuildSettings.buildAppBundle = previousBuildAppBundle;
+            }
+        }
+
+        private static void RequireGenericEmbeddingModelForRelease()
+        {
+            if (!File.Exists(GenericEmbeddingModelPath))
+            {
+                throw new BuildFailedException(
+                    "The generic AI embedding model is missing from the release workspace. " +
+                    "Run tools/prepare_generic_embedding_model.py before building the production App Bundle.");
+            }
+
+            AssetDatabase.ImportAsset(GenericEmbeddingModelPath, ImportAssetOptions.ForceSynchronousImport);
+            var modelAsset = AssetDatabase.LoadAssetAtPath<ModelAsset>(GenericEmbeddingModelPath);
+            if (modelAsset == null)
+            {
+                throw new BuildFailedException(
+                    "The prepared generic embedding ONNX file could not be imported as a Unity ModelAsset. " +
+                    "The production App Bundle is blocked rather than shipping without self-service recognition.");
+            }
+
+            var resourceAsset = Resources.Load<ModelAsset>(SentisProductEmbeddingExtractor.ResourceName);
+            if (resourceAsset == null)
+            {
+                throw new BuildFailedException(
+                    $"The generic embedding model is not addressable from Resources as '{SentisProductEmbeddingExtractor.ResourceName}'.");
             }
         }
 

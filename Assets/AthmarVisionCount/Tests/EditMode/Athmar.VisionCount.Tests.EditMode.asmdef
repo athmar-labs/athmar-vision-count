@@ -3,6 +3,7 @@
   "rootNamespace": "AthmarLabs.VisionCount.Tests",
   "references": [
     "Athmar.VisionCount.Runtime",
+    "Unity.InferenceEngine",
     "UnityEngine.UI"
   ],
   "includePlatforms": [

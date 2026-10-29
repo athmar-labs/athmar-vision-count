@@ -1,0 +1,109 @@
+name: Generic Sentis Embedding Validation
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/generic-embedding-validation.yml"
+      - "tools/prepare_generic_embedding_model.py"
+      - "Assets/AthmarVisionCount/Runtime/SentisProductEmbeddingExtractor.cs"
+      - "Assets/AthmarVisionCount/Runtime/ProductEnrollmentCoordinator.cs"
+      - "Assets/AthmarVisionCount/Tests/EditMode/SentisProductEmbeddingExtractorTests.cs"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  checks: write
+
+concurrency:
+  group: generic-embedding-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  UNITY_VERSION: 6000.3.10f1
+  ATHMAR_REQUIRE_GENERIC_EMBEDDING: "1"
+
+jobs:
+  prepare-and-test:
+    name: Prepare pinned model and run Sentis EditMode test
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Install pinned ONNX preparation dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --disable-pip-version-check \
+            numpy==1.26.4 \
+            protobuf==5.28.3 \
+            onnx==1.17.0
+
+      - name: Prepare and verify generic MobileNetV3 embedding model
+        shell: bash
+        run: |
+          set -euo pipefail
+          python tools/prepare_generic_embedding_model.py
+          test -s Assets/Generated/Resources/AthmarGenericEmbedding.onnx
+          cat Assets/Generated/Resources/AthmarGenericEmbedding.provenance.json
+
+      - name: Reclaim runner disk space for Unity test image
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo rm -rf \
+            /usr/share/dotnet \
+            /opt/ghc \
+            /usr/local/lib/android \
+            /usr/local/share/boost \
+            /usr/share/swift \
+            /opt/hostedtoolcache/CodeQL \
+            /usr/local/.ghcup \
+            /usr/local/share/chromium \
+            /opt/google/chrome \
+            /opt/microsoft/msedge || true
+          sudo apt-get clean
+          docker system prune --all --force --volumes || true
+          df -h /
+
+      - name: Verify Unity activation secrets
+        shell: bash
+        env:
+          UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
+          UNITY_SERIAL: ${{ secrets.UNITY_SERIAL }}
+          UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
+          UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          test -n "$UNITY_EMAIL"
+          test -n "$UNITY_PASSWORD"
+          if [ -z "$UNITY_SERIAL" ] && [ -z "$UNITY_LICENSE" ]; then
+            echo "Missing Unity activation credential."
+            exit 1
+          fi
+
+      - name: Run real Sentis embedding test
+        uses: game-ci/unity-test-runner@32e57712352b500e17974b245a6dce9e11a73213 # v4
+        env:
+          UNITY_SERIAL: ${{ secrets.UNITY_SERIAL }}
+          UNITY_LICENSE: ${{ secrets.UNITY_SERIAL != '' && '' || secrets.UNITY_LICENSE }}
+          UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
+          UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+          ATHMAR_REQUIRE_GENERIC_EMBEDDING: "1"
+        with:
+          projectPath: .
+          unityVersion: ${{ env.UNITY_VERSION }}
+          testMode: EditMode
+          artifactsPath: generic-embedding-test-results
+          githubToken: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload provenance and test results
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: generic-sentis-embedding-validation
+          path: |
+            Assets/Generated/Resources/AthmarGenericEmbedding.provenance.json
+            generic-embedding-test-results
+          if-no-files-found: warn
+          retention-days: 14

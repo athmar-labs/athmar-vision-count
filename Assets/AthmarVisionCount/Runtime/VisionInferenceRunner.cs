@@ -8,6 +8,9 @@ namespace AthmarLabs.VisionCount
 {
     public sealed class VisionInferenceRunner : MonoBehaviour
     {
+        private const double CameraDeviceDiscoveryTimeoutSeconds = 8d;
+        private const double CameraFrameTimeoutSeconds = 12d;
+
         public event Action<IReadOnlyList<Detection>> DetectionsReady;
         public event Action<string> StatusChanged;
         public event Action<string> Faulted;
@@ -19,6 +22,9 @@ namespace AthmarLabs.VisionCount
         private Tensor<float> _inputTensor;
         private WebCamTexture _cameraTexture;
         private Awaitable _inferenceLoop;
+        private BackendType _backend;
+        private float[] _cpuInputBuffer;
+        private Color32[] _cpuCameraPixels;
         private bool _loopStarted;
         private bool _running;
         private bool _paused;
@@ -91,6 +97,8 @@ namespace AthmarLabs.VisionCount
             _worker?.Dispose();
             _worker = null;
             _model = null;
+            _cpuInputBuffer = null;
+            _cpuCameraPixels = null;
             _config = null;
             _catalogue = null;
             _activeInferenceStage = "stopped";
@@ -112,8 +120,6 @@ namespace AthmarLabs.VisionCount
             {
                 _activeInferenceStage = "create_resources";
                 CreateInferenceResources();
-                _activeInferenceStage = "start_camera";
-                StartRearCamera();
             }
             catch (Exception exception)
             {
@@ -122,13 +128,68 @@ namespace AthmarLabs.VisionCount
                 yield break;
             }
 
-            var timeoutAt = Time.realtimeSinceStartupAsDouble + 10d;
-            while (_cameraTexture != null && _cameraTexture.isPlaying && _cameraTexture.width <= 16 && Time.realtimeSinceStartupAsDouble < timeoutAt)
+            // Android can grant the camera permission before Unity refreshes WebCamTexture.devices.
+            // Give the application focus and the device list time to settle instead of failing on
+            // the first empty enumeration immediately after the permission dialog closes.
+            yield return null;
+            _activeInferenceStage = "discover_camera";
+            StatusChanged?.Invoke("discovering_camera");
+
+            var discoveryTimeoutAt = Time.realtimeSinceStartupAsDouble + CameraDeviceDiscoveryTimeoutSeconds;
+            while (_cameraTexture == null && Time.realtimeSinceStartupAsDouble < discoveryTimeoutAt)
+            {
+                if (!Application.isFocused)
+                {
+                    yield return null;
+                    continue;
+                }
+
+                var devices = WebCamTexture.devices;
+                if (devices != null && devices.Length > 0)
+                {
+                    try
+                    {
+                        _activeInferenceStage = "start_camera";
+                        StartRearCamera(devices);
+                    }
+                    catch (Exception exception)
+                    {
+                        ReportDetailedFault("Unable to initialize on-device inference", _activeInferenceStage, exception);
+                        StopPipeline();
+                        yield break;
+                    }
+
+                    break;
+                }
+
+                yield return null;
+            }
+
+            // Some Android devices can open the default camera even when Unity's device enumeration
+            // remains temporarily empty. Let the actual frame timeout decide whether the fallback works.
+            if (_cameraTexture == null)
+            {
+                try
+                {
+                    _activeInferenceStage = "start_default_camera";
+                    StartDefaultCamera();
+                }
+                catch (Exception exception)
+                {
+                    ReportDetailedFault("Unable to initialize on-device inference", _activeInferenceStage, exception);
+                    StopPipeline();
+                    yield break;
+                }
+            }
+
+            _activeInferenceStage = "wait_for_camera_frame";
+            var frameTimeoutAt = Time.realtimeSinceStartupAsDouble + CameraFrameTimeoutSeconds;
+            while (_cameraTexture != null && _cameraTexture.isPlaying && _cameraTexture.width <= 16 && Time.realtimeSinceStartupAsDouble < frameTimeoutAt)
                 yield return null;
 
             if (_cameraTexture == null || !_cameraTexture.isPlaying || _cameraTexture.width <= 16)
             {
-                ReportFault("The device camera did not provide frames within the allowed time.");
+                ReportFault("The device camera did not provide frames within the allowed time. Confirm camera permission and close other apps using the camera.");
                 StopPipeline();
                 yield break;
             }
@@ -150,10 +211,10 @@ namespace AthmarLabs.VisionCount
             if (_model == null)
                 throw new InvalidOperationException("ModelLoader returned no model.");
 
-            var backend = _config.PreferGpu && SystemInfo.supportsComputeShaders
+            _backend = _config.PreferGpu && SystemInfo.supportsComputeShaders
                 ? BackendType.GPUCompute
                 : BackendType.CPU;
-            _worker = new Worker(_model, backend);
+            _worker = new Worker(_model, _backend);
             if (_worker == null)
                 throw new InvalidOperationException("Unable to create the inference worker.");
 
@@ -163,15 +224,16 @@ namespace AthmarLabs.VisionCount
             _inputTensor = new Tensor<float>(shape);
             if (_inputTensor == null)
                 throw new InvalidOperationException("Unable to allocate the input tensor.");
+
+            if (_backend == BackendType.CPU)
+                _cpuInputBuffer = new float[checked(_config.ModelInputWidth * _config.ModelInputHeight * 3)];
         }
 
-        private void StartRearCamera()
+        private void StartRearCamera(WebCamDevice[] devices)
         {
             EnsureConfigured();
-
-            var devices = WebCamTexture.devices;
             if (devices == null || devices.Length == 0)
-                throw new InvalidOperationException("No camera is available on this device.");
+                throw new ArgumentException("At least one camera device is required.", nameof(devices));
 
             var selected = devices[0];
             for (var index = 0; index < devices.Length; index++)
@@ -184,6 +246,16 @@ namespace AthmarLabs.VisionCount
 
             _cameraTexture = new WebCamTexture(
                 selected.name,
+                Math.Max(1280, _config.ModelInputWidth),
+                Math.Max(720, _config.ModelInputHeight),
+                30);
+            _cameraTexture.Play();
+        }
+
+        private void StartDefaultCamera()
+        {
+            EnsureConfigured();
+            _cameraTexture = new WebCamTexture(
                 Math.Max(1280, _config.ModelInputWidth),
                 Math.Max(720, _config.ModelInputHeight),
                 30);
@@ -225,13 +297,21 @@ namespace AthmarLabs.VisionCount
         {
             EnsureRuntimeState();
 
-            _activeInferenceStage = "prepare_input_transform";
-            var transform = new TextureTransform();
-            if (_config.InputLayout == ModelInputLayout.Nhwc)
-                transform.SetTensorLayout(TensorLayout.NHWC);
+            if (_backend == BackendType.CPU)
+            {
+                _activeInferenceStage = "camera_to_cpu_tensor";
+                FillCpuInputTensor();
+            }
+            else
+            {
+                _activeInferenceStage = "prepare_input_transform";
+                var transform = new TextureTransform();
+                if (_config.InputLayout == ModelInputLayout.Nhwc)
+                    transform.SetTensorLayout(TensorLayout.NHWC);
 
-            _activeInferenceStage = "texture_to_tensor";
-            TextureConverter.ToTensor(_cameraTexture, _inputTensor, transform);
+                _activeInferenceStage = "texture_to_tensor";
+                TextureConverter.ToTensor(_cameraTexture, _inputTensor, transform);
+            }
 
             _activeInferenceStage = "schedule_worker";
             _worker.Schedule(_inputTensor);
@@ -282,6 +362,35 @@ namespace AthmarLabs.VisionCount
             _activeInferenceStage = "publish_detections";
             DetectionsReady?.Invoke(detections);
             _activeInferenceStage = "idle";
+        }
+
+        private void FillCpuInputTensor()
+        {
+            if (_cpuInputBuffer == null)
+                throw new InvalidOperationException("CPU inference input buffer is unavailable.");
+
+            var sourceWidth = _cameraTexture.width;
+            var sourceHeight = _cameraTexture.height;
+            if (sourceWidth <= 16 || sourceHeight <= 16)
+                throw new InvalidOperationException("The camera frame is too small for CPU inference.");
+
+            var requiredPixels = checked(sourceWidth * sourceHeight);
+            if (_cpuCameraPixels == null || _cpuCameraPixels.Length != requiredPixels)
+                _cpuCameraPixels = new Color32[requiredPixels];
+
+            _cpuCameraPixels = _cameraTexture.GetPixels32(_cpuCameraPixels);
+            if (_cpuCameraPixels == null || _cpuCameraPixels.Length != requiredPixels)
+                throw new InvalidOperationException("Unable to read the current camera frame for CPU inference.");
+
+            CpuRgbTensorWriter.ResizeRgb01(
+                _cpuCameraPixels,
+                sourceWidth,
+                sourceHeight,
+                _config.ModelInputWidth,
+                _config.ModelInputHeight,
+                _config.InputLayout,
+                _cpuInputBuffer);
+            _inputTensor.Upload(_cpuInputBuffer);
         }
 
         private void EnsureConfigured()
