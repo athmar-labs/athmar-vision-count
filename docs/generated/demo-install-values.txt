@@ -1,2 +1,2 @@
 Manifest URL: https://athmar-labs.github.io/athmar-vision-count/demo-customer-v1/manifest.json
-Manifest SHA-256: 5b5928b4a13cfbcdcc39ed5b15121e1fe9562c5193811cbdd795d45d99ee1ad1
+Manifest SHA-256: f29810103c9320a125a5bf71d8a8d45e9e822dc2feca75efa11a3e9fbb9ba7e0
