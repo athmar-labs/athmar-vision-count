@@ -80,7 +80,7 @@ jobs:
             -athmarOnnxPath Build/athmar-inputs/best_detect.onnx
             -athmarCataloguePath Build/athmar-inputs/sku_catalogue.csv
             -athmarCustomerCode ATHMAR-FOOD-PILOT
-            -athmarCustomerName "أثمار — عدّ أدوات المطاعم"
+            -athmarCustomerName Athmar-Food-Pilot
           runAsHostUser: true
 
       - name: Validate generated install values
