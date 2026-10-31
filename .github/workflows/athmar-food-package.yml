@@ -1,0 +1,137 @@
+name: Publish Athmar Food Customer Package
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+env:
+  UNITY_VERSION: 6000.3.10f1
+  MODEL_URL: https://raw.githubusercontent.com/MoatasimFaroog1111/athmar-food-training/main/best_detect.onnx
+  CATALOGUE_URL: https://raw.githubusercontent.com/MoatasimFaroog1111/athmar-food-training/main/sku_catalogue_detect.csv
+  PACKAGE_BASE_URL: https://athmar-labs.github.io/athmar-vision-count/athmar-food-v1
+
+concurrency:
+  group: athmar-food-package-pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build and publish Athmar food package
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Reclaim runner disk space for Unity
+        shell: bash
+        run: |
+          sudo rm -rf \
+            /usr/share/dotnet \
+            /opt/ghc \
+            /usr/local/lib/android \
+            /usr/local/share/boost \
+            /usr/share/swift \
+            /opt/hostedtoolcache/CodeQL \
+            /usr/local/.ghcup \
+            /usr/local/share/chromium \
+            /opt/google/chrome \
+            /opt/microsoft/msedge || true
+          sudo apt-get clean
+          docker system prune --all --force --volumes || true
+
+      - name: Download trained model and catalogue
+        shell: bash
+        run: |
+          mkdir -p Build/athmar-inputs
+          curl --fail --silent --show-error --location "$MODEL_URL" -o Build/athmar-inputs/best_detect.onnx
+          curl --fail --silent --show-error --location "$CATALOGUE_URL" -o Build/athmar-inputs/sku_catalogue.csv
+          ls -la Build/athmar-inputs
+
+      - name: Verify Unity activation secrets
+        shell: bash
+        env:
+          UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
+          UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
+          UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+        run: |
+          test -n "$UNITY_LICENSE"
+          test -n "$UNITY_EMAIL"
+          test -n "$UNITY_PASSWORD"
+
+      - name: Build and validate Athmar customer package
+        uses: game-ci/unity-builder@v4
+        env:
+          UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
+          UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
+          UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+        with:
+          projectPath: .
+          unityVersion: ${{ env.UNITY_VERSION }}
+          targetPlatform: StandaloneLinux64
+          buildMethod: AthmarLabs.VisionCount.Editor.AthmarCustomerPackageBuilder.Build
+          customParameters: >-
+            -athmarPackageBaseUrl ${{ env.PACKAGE_BASE_URL }}
+            -athmarOnnxPath Build/athmar-inputs/best_detect.onnx
+            -athmarCataloguePath Build/athmar-inputs/sku_catalogue.csv
+            -athmarCustomerCode ATHMAR-FOOD-PILOT
+            -athmarCustomerName "أثمار — عدّ أدوات المطاعم"
+          runAsHostUser: true
+
+      - name: Validate generated install values
+        shell: bash
+        run: |
+          test -s Build/AthmarCustomerPackage/manifest.json
+          test -s Build/AthmarCustomerPackage/manifest.sha256
+          test -s Build/AthmarCustomerPackage/install-values.txt
+          test -s Build/AthmarCustomerPackage/production.sentis
+          test -s Build/AthmarCustomerPackage/sku_catalogue.csv
+          grep -Eq '^[0-9a-fA-F]{64}$' Build/AthmarCustomerPackage/manifest.sha256
+          echo '## Athmar food package install values' >> "$GITHUB_STEP_SUMMARY"
+          echo '```text' >> "$GITHUB_STEP_SUMMARY"
+          cat Build/AthmarCustomerPackage/install-values.txt >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload package artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: athmar-food-customer-package
+          path: Build/AthmarCustomerPackage
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Prepare GitHub Pages artifact
+        shell: bash
+        run: |
+          mkdir -p _site/athmar-food-v1
+          cp Build/AthmarCustomerPackage/manifest.json _site/athmar-food-v1/
+          cp Build/AthmarCustomerPackage/manifest.sha256 _site/athmar-food-v1/
+          cp Build/AthmarCustomerPackage/install-values.txt _site/athmar-food-v1/
+          cp Build/AthmarCustomerPackage/production.sentis _site/athmar-food-v1/
+          cp Build/AthmarCustomerPackage/sku_catalogue.csv _site/athmar-food-v1/
+
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload GitHub Pages artifact
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: _site
+
+  deploy:
+    name: Deploy GitHub Pages
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+      - name: Deploy GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
