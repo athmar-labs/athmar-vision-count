@@ -2,6 +2,7 @@ using System;
 using System.IO;
 using System.Text;
 using Unity.InferenceEngine;
+using UnityEditor;
 using UnityEditor.Build;
 using UnityEngine;
 
@@ -55,12 +56,9 @@ namespace AthmarLabs.VisionCount.Editor
             var catalogueOut = Path.Combine(outputDirectory, CatalogueFileName);
             File.WriteAllText(catalogueOut, catalogueText, new UTF8Encoding(false));
 
-            // 3) أبعاد النموذج — تُقرأ من الـ ONNX المحمّل (لا تخمين)
-            var model = ModelLoader.Load(sentisPath);
-            var inputShape = model.inputs[0].shape;
-            var outputShape = model.outputs[0].shape;
-            var modelInputWidth = inputShape.rank >= 4 ? inputShape[3] : 640;
-            var modelInputHeight = inputShape.rank >= 4 ? inputShape[2] : 640;
+            // 3) أبعاد النموذج — ثابتة (YOLOv8 detection 640×640)
+            var modelInputWidth = 640;
+            var modelInputHeight = 640;
 
             // 4) manifest
             var manifest = new CustomerPackageManifest
@@ -112,8 +110,18 @@ namespace AthmarLabs.VisionCount.Editor
 
         private static void ConvertOnnxToSentis(string onnxPath, string sentisPath)
         {
-            // ModelLoader.Load يدعم .onnx في الـ Editor (يتحوّل تلقائياً عبر OnnxConverter)
-            var model = ModelLoader.Load(onnxPath);
+            // نسخ ONNX إلى داخل المشروع ثم استيراده كـ ModelAsset (طريقة Sentis الصحيحة)
+            const string assetRelativePath = "Assets/Generated/Resources/AthmarFoodDetection.onnx";
+            var assetAbsolutePath = Path.Combine(Application.dataPath, "Generated", "Resources", "AthmarFoodDetection.onnx");
+            Directory.CreateDirectory(Path.GetDirectoryName(assetAbsolutePath) ?? string.Empty);
+            File.Copy(onnxPath, assetAbsolutePath, true);
+
+            AssetDatabase.ImportAsset(assetRelativePath, ImportAssetOptions.ForceSynchronousImport);
+            var modelAsset = AssetDatabase.LoadAssetAtPath<ModelAsset>(assetRelativePath);
+            if (modelAsset == null)
+                throw new BuildFailedException("Failed to import ONNX as a Sentis ModelAsset.");
+
+            var model = ModelLoader.Load(modelAsset);
             ModelWriter.Save(sentisPath, model);
             Debug.Log($"Converted ONNX → Sentis: {Path.GetFileName(sentisPath)}");
         }
