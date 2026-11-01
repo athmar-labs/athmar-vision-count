@@ -40,6 +40,43 @@ namespace AthmarLabs.VisionCount.Tests
         }
 
         [Test]
+        public void DecoderDetectsPixelCoordinatesWhenManifestClaimsNormalized()
+        {
+            var catalogue = SkuCatalogue.Parse(
+                "label_index,sku,name_en,name_ar\n" +
+                "0,SKU-001,Apple,تفاح\n");
+
+            // Ultralytics YOLOv8 export: [1, 4 + classes, candidates] with pixel boxes.
+            var output = new[]
+            {
+                320f,
+                320f,
+                128f,
+                64f,
+                0.90f
+            };
+
+            var detections = YoloOutputDecoder.Decode(
+                output,
+                5,
+                1,
+                DetectionTensorLayout.ChannelsFirst,
+                false,
+                true,
+                640,
+                640,
+                0.50f,
+                0.45f,
+                100,
+                catalogue);
+
+            Assert.That(detections, Has.Count.EqualTo(1));
+            Assert.That(detections[0].Bounds.Width, Is.EqualTo(0.2f).Within(0.0001f));
+            Assert.That(detections[0].Bounds.Height, Is.EqualTo(0.1f).Within(0.0001f));
+            Assert.That(detections[0].Bounds.X, Is.EqualTo(0.4f).Within(0.0001f));
+        }
+
+        [Test]
         public void ChannelsFirstDecoderAppliesConfidenceCatalogueAndNms()
         {
             var catalogue = SkuCatalogue.Parse(

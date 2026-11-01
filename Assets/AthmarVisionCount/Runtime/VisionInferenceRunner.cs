@@ -9,7 +9,9 @@ namespace AthmarLabs.VisionCount
     public sealed class VisionInferenceRunner : MonoBehaviour
     {
         private const double CameraDeviceDiscoveryTimeoutSeconds = 8d;
-        private const double CameraFrameTimeoutSeconds = 12d;
+        private const double CameraFrameTimeoutSeconds = 6d;
+        private const int CameraStartAttempts = 3;
+        private const float CameraReleaseDelaySeconds = 0.6f;
 
         public event Action<IReadOnlyList<Detection>> DetectionsReady;
         public event Action<string> StatusChanged;
@@ -29,6 +31,8 @@ namespace AthmarLabs.VisionCount
         private bool _loopStarted;
         private bool _running;
         private bool _paused;
+        private bool _cameraFaulted;
+        private bool _cameraStarting;
         private double _nextInferenceAt;
         private string _activeInferenceStage = "idle";
 
@@ -82,6 +86,15 @@ namespace AthmarLabs.VisionCount
         {
             _paused = false;
             _nextInferenceAt = 0d;
+            if (_cameraFaulted && !_cameraStarting && _worker != null && _config != null)
+            {
+                // The camera failed earlier (busy, slow HAL, app was backgrounded). Retry instead of
+                // leaving the operator on a black preview with a resume button that does nothing.
+                _cameraFaulted = false;
+                StartCoroutine(RestartCamera());
+                return;
+            }
+
             if (IsReady)
                 StatusChanged?.Invoke("scanning");
         }
@@ -91,19 +104,15 @@ namespace AthmarLabs.VisionCount
             StopAllCoroutines();
             _running = false;
             _paused = true;
+            _cameraFaulted = false;
+            _cameraStarting = false;
             if (_loopStarted)
             {
                 _inferenceLoop.Cancel();
                 _loopStarted = false;
             }
 
-            if (_cameraTexture != null)
-            {
-                if (_cameraTexture.isPlaying)
-                    _cameraTexture.Stop();
-                Destroy(_cameraTexture);
-                _cameraTexture = null;
-            }
+            ReleaseCamera();
 
             _inputTensor?.Dispose();
             _inputTensor = null;
@@ -145,72 +154,102 @@ namespace AthmarLabs.VisionCount
                 yield break;
             }
 
-            yield return null;
-            _activeInferenceStage = "discover_camera";
-            StatusChanged?.Invoke("discovering_camera");
+            yield return StartCameraWithRetries();
+        }
 
-            var discoveryTimeoutAt = Time.realtimeSinceStartupAsDouble + CameraDeviceDiscoveryTimeoutSeconds;
-            while (_cameraTexture == null && Time.realtimeSinceStartupAsDouble < discoveryTimeoutAt)
+        private IEnumerator RestartCamera()
+        {
+            yield return StartCameraWithRetries();
+        }
+
+        private IEnumerator StartCameraWithRetries()
+        {
+            _cameraStarting = true;
+            for (var attempt = 1; attempt <= CameraStartAttempts; attempt++)
             {
-                if (!Application.isFocused)
-                {
+                // Give Android time to release a camera held by a previous pipeline or another app.
+                yield return new WaitForSecondsRealtime(CameraReleaseDelaySeconds * attempt);
+                while (!Application.isFocused)
                     yield return null;
-                    continue;
+
+                _activeInferenceStage = "discover_camera";
+                StatusChanged?.Invoke("discovering_camera");
+                var discoveryTimeoutAt = Time.realtimeSinceStartupAsDouble + CameraDeviceDiscoveryTimeoutSeconds;
+                WebCamDevice[] devices = null;
+                while (Time.realtimeSinceStartupAsDouble < discoveryTimeoutAt)
+                {
+                    devices = WebCamTexture.devices;
+                    if (devices != null && devices.Length > 0)
+                        break;
+                    yield return null;
                 }
 
-                var devices = WebCamTexture.devices;
-                if (devices != null && devices.Length > 0)
+                try
                 {
-                    try
+                    if (devices != null && devices.Length > 0)
                     {
                         _activeInferenceStage = "start_camera";
                         StartRearCamera(devices);
                     }
-                    catch (Exception exception)
+                    else
                     {
-                        ReportDetailedFault("Unable to initialize on-device inference", _activeInferenceStage, exception);
-                        StopPipeline();
-                        yield break;
+                        _activeInferenceStage = "start_default_camera";
+                        StartDefaultCamera();
                     }
-
-                    break;
-                }
-
-                yield return null;
-            }
-
-            if (_cameraTexture == null)
-            {
-                try
-                {
-                    _activeInferenceStage = "start_default_camera";
-                    StartDefaultCamera();
                 }
                 catch (Exception exception)
                 {
-                    ReportDetailedFault("Unable to initialize on-device inference", _activeInferenceStage, exception);
-                    StopPipeline();
+                    Debug.LogWarning($"Camera start attempt {attempt} failed: {exception}");
+                    ReleaseCamera();
+                    continue;
+                }
+
+                _activeInferenceStage = "wait_for_camera_frame";
+                var waited = 0d;
+                while (_cameraTexture != null && _cameraTexture.width <= 16 && waited < CameraFrameTimeoutSeconds)
+                {
+                    // Only count time while the app is in the foreground (permission dialogs, app switches).
+                    if (Application.isFocused)
+                        waited += Time.unscaledDeltaTime;
+                    if (_cameraTexture != null && !_cameraTexture.isPlaying && Application.isFocused)
+                        _cameraTexture.Play();
+                    yield return null;
+                }
+
+                if (_cameraTexture != null && _cameraTexture.isPlaying && _cameraTexture.width > 16)
+                {
+                    _cameraStarting = false;
+                    _cameraFaulted = false;
+                    _running = true;
+                    _activeInferenceStage = "ready";
+                    StatusChanged?.Invoke(_paused ? "paused" : "scanning");
+                    if (!_loopStarted)
+                    {
+                        _inferenceLoop = RunInferenceLoop();
+                        _loopStarted = true;
+                    }
+
                     yield break;
                 }
+
+                Debug.LogWarning($"Camera produced no frames on attempt {attempt}/{CameraStartAttempts}; retrying.");
+                ReleaseCamera();
             }
 
-            _activeInferenceStage = "wait_for_camera_frame";
-            var frameTimeoutAt = Time.realtimeSinceStartupAsDouble + CameraFrameTimeoutSeconds;
-            while (_cameraTexture != null && _cameraTexture.isPlaying && _cameraTexture.width <= 16 && Time.realtimeSinceStartupAsDouble < frameTimeoutAt)
-                yield return null;
+            _cameraStarting = false;
+            _cameraFaulted = true;
+            _running = false;
+            ReportFault("The device camera did not provide frames within the allowed time. Confirm camera permission and close other apps using the camera.");
+        }
 
-            if (_cameraTexture == null || !_cameraTexture.isPlaying || _cameraTexture.width <= 16)
-            {
-                ReportFault("The device camera did not provide frames within the allowed time. Confirm camera permission and close other apps using the camera.");
-                StopPipeline();
-                yield break;
-            }
-
-            _running = true;
-            _activeInferenceStage = "ready";
-            StatusChanged?.Invoke(_paused ? "paused" : "scanning");
-            _inferenceLoop = RunInferenceLoop();
-            _loopStarted = true;
+        private void ReleaseCamera()
+        {
+            if (_cameraTexture == null)
+                return;
+            if (_cameraTexture.isPlaying)
+                _cameraTexture.Stop();
+            Destroy(_cameraTexture);
+            _cameraTexture = null;
         }
 
         private void CreateInferenceResources()
@@ -237,8 +276,7 @@ namespace AthmarLabs.VisionCount
             if (_inputTensor == null)
                 throw new InvalidOperationException("Unable to allocate the input tensor.");
 
-            if (_backend == BackendType.CPU)
-                _cpuInputBuffer = new float[checked(_config.ModelInputWidth * _config.ModelInputHeight * 3)];
+            _cpuInputBuffer = new float[checked(_config.ModelInputWidth * _config.ModelInputHeight * 3)];
         }
 
         private void StartRearCamera(WebCamDevice[] devices)
@@ -309,21 +347,14 @@ namespace AthmarLabs.VisionCount
         {
             EnsureRuntimeState();
 
-            if (_backend == BackendType.CPU)
-            {
-                _activeInferenceStage = "camera_to_cpu_tensor";
-                FillCpuInputTensor();
-            }
-            else
-            {
-                _activeInferenceStage = "prepare_input_transform";
-                var transform = new TextureTransform();
-                if (_config.InputLayout == ModelInputLayout.Nhwc)
-                    transform.SetTensorLayout(TensorLayout.NHWC);
-
-                _activeInferenceStage = "texture_to_tensor";
-                TextureConverter.ToTensor(_cameraTexture, _inputTensor, transform);
-            }
+            // Build the tensor on the CPU for every backend so the model sees the upright frame the
+            // operator sees (portrait phones deliver landscape, rotated sensor frames) with the
+            // correct row order. The worker itself still runs on the GPU when available.
+            var orientation = new CameraFrameOrientation(
+                _cameraTexture.videoRotationAngle,
+                _cameraTexture.videoVerticallyMirrored);
+            _activeInferenceStage = "camera_to_upright_tensor";
+            FillCpuInputTensor(orientation);
 
             _activeInferenceStage = "schedule_worker";
             _worker.Schedule(_inputTensor);
@@ -371,6 +402,20 @@ namespace AthmarLabs.VisionCount
             if (detections == null)
                 throw new InvalidOperationException("The YOLO decoder returned no detection collection.");
 
+            if (!orientation.IsIdentity)
+            {
+                // Downstream consumers (overlay, tracking, crops) use raw texture coordinates.
+                _activeInferenceStage = "map_detections_to_texture";
+                for (var index = 0; index < detections.Count; index++)
+                {
+                    var upright = detections[index];
+                    detections[index] = new Detection(
+                        upright.Sku,
+                        upright.Confidence,
+                        orientation.UprightToTexture(upright.Bounds));
+                }
+            }
+
             IReadOnlyList<Detection> detectionsToPublish = detections;
             if (_detectionPostProcessor != null && detections.Count > 0)
             {
@@ -383,7 +428,7 @@ namespace AthmarLabs.VisionCount
             _activeInferenceStage = "idle";
         }
 
-        private void FillCpuInputTensor()
+        private void FillCpuInputTensor(CameraFrameOrientation orientation)
         {
             if (_cpuInputBuffer == null)
                 throw new InvalidOperationException("CPU inference input buffer is unavailable.");
@@ -401,10 +446,11 @@ namespace AthmarLabs.VisionCount
             if (_cpuCameraPixels == null || _cpuCameraPixels.Length != requiredPixels)
                 throw new InvalidOperationException("Unable to read the current camera frame for CPU inference.");
 
-            CpuRgbTensorWriter.ResizeRgb01(
+            CpuRgbTensorWriter.WriteUprightRgb01(
                 _cpuCameraPixels,
                 sourceWidth,
                 sourceHeight,
+                orientation,
                 _config.ModelInputWidth,
                 _config.ModelInputHeight,
                 _config.InputLayout,
