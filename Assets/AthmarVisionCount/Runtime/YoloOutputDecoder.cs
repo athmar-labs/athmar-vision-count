@@ -41,6 +41,12 @@ namespace AthmarLabs.VisionCount
             if (classCount <= 0)
                 throw new InvalidOperationException("The model output does not contain any class scores.");
 
+            // Ultralytics YOLO exports emit boxes in input-pixel units even when a manifest claims
+            // normalized coordinates. Treating pixel boxes as normalized clamps every box to zero
+            // width and silently drops all detections, so detect pixel-space output defensively.
+            if (coordinatesNormalized && HasPixelSpaceCoordinates(data, layout, featureCount, candidateCount))
+                coordinatesNormalized = false;
+
             var candidates = new List<Detection>();
             for (var candidateIndex = 0; candidateIndex < candidateCount; candidateIndex++)
             {
@@ -118,6 +124,27 @@ namespace AthmarLabs.VisionCount
             }
 
             return selected;
+        }
+
+        private const float PixelCoordinateThreshold = 2f;
+
+        internal static bool HasPixelSpaceCoordinates(
+            IReadOnlyList<float> data,
+            DetectionTensorLayout layout,
+            int featureCount,
+            int candidateCount)
+        {
+            for (var candidateIndex = 0; candidateIndex < candidateCount; candidateIndex++)
+            {
+                for (var featureIndex = 0; featureIndex < 4; featureIndex++)
+                {
+                    var value = Read(data, layout, featureCount, candidateCount, candidateIndex, featureIndex);
+                    if (!float.IsNaN(value) && !float.IsInfinity(value) && value > PixelCoordinateThreshold)
+                        return true;
+                }
+            }
+
+            return false;
         }
 
         private static float ReadFinite(
