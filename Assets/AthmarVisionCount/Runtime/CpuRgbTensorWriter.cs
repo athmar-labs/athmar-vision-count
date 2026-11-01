@@ -79,6 +79,79 @@ namespace AthmarLabs.VisionCount
             }
         }
 
+        /// <summary>
+        /// Writes an upright, top-origin RGB [0..1] tensor from bottom-origin camera pixels
+        /// (WebCamTexture.GetPixels32), applying the camera's mirror and clockwise rotation so
+        /// the model sees the same image the operator sees on screen.
+        /// </summary>
+        public static void WriteUprightRgb01(
+            Color32[] bottomOriginSource,
+            int sourceWidth,
+            int sourceHeight,
+            CameraFrameOrientation orientation,
+            int targetWidth,
+            int targetHeight,
+            ModelInputLayout layout,
+            float[] destination)
+        {
+            if (bottomOriginSource == null)
+                throw new ArgumentNullException(nameof(bottomOriginSource));
+            if (destination == null)
+                throw new ArgumentNullException(nameof(destination));
+            if (sourceWidth <= 0 || sourceHeight <= 0 || targetWidth <= 0 || targetHeight <= 0)
+                throw new ArgumentOutOfRangeException(nameof(sourceWidth), "Source and target dimensions must be positive.");
+            if (bottomOriginSource.Length != checked(sourceWidth * sourceHeight))
+                throw new ArgumentException("Source pixel count does not match source dimensions.", nameof(bottomOriginSource));
+            if (destination.Length != checked(targetWidth * targetHeight * 3))
+                throw new ArgumentException("Destination buffer must contain exactly targetWidth * targetHeight * 3 floats.", nameof(destination));
+
+            var planeSize = targetWidth * targetHeight;
+            for (var y = 0; y < targetHeight; y++)
+            {
+                var uprightY = (y + 0.5f) / targetHeight;
+                for (var x = 0; x < targetWidth; x++)
+                {
+                    var uprightX = (x + 0.5f) / targetWidth;
+                    orientation.UprightToTexture(uprightX, uprightY, out var textureX, out var textureY);
+
+                    var sourceX = Mathf.Clamp((textureX * sourceWidth) - 0.5f, 0f, sourceWidth - 1f);
+                    // Texture coordinates are top-origin; GetPixels32 rows are bottom-origin.
+                    var sourceRow = Mathf.Clamp(((1f - textureY) * sourceHeight) - 0.5f, 0f, sourceHeight - 1f);
+
+                    var x0 = Mathf.FloorToInt(sourceX);
+                    var y0 = Mathf.FloorToInt(sourceRow);
+                    var x1 = Mathf.Min(x0 + 1, sourceWidth - 1);
+                    var y1 = Mathf.Min(y0 + 1, sourceHeight - 1);
+                    var fx = sourceX - x0;
+                    var fy = sourceRow - y0;
+
+                    var c00 = bottomOriginSource[(y0 * sourceWidth) + x0];
+                    var c10 = bottomOriginSource[(y0 * sourceWidth) + x1];
+                    var c01 = bottomOriginSource[(y1 * sourceWidth) + x0];
+                    var c11 = bottomOriginSource[(y1 * sourceWidth) + x1];
+
+                    var r = BilinearChannel(c00.r, c10.r, c01.r, c11.r, fx, fy);
+                    var g = BilinearChannel(c00.g, c10.g, c01.g, c11.g, fx, fy);
+                    var b = BilinearChannel(c00.b, c10.b, c01.b, c11.b, fx, fy);
+                    var pixelIndex = (y * targetWidth) + x;
+
+                    if (layout == ModelInputLayout.Nhwc)
+                    {
+                        var destinationIndex = pixelIndex * 3;
+                        destination[destinationIndex] = r;
+                        destination[destinationIndex + 1] = g;
+                        destination[destinationIndex + 2] = b;
+                    }
+                    else
+                    {
+                        destination[pixelIndex] = r;
+                        destination[planeSize + pixelIndex] = g;
+                        destination[(planeSize * 2) + pixelIndex] = b;
+                    }
+                }
+            }
+        }
+
         private static float BilinearChannel(byte c00, byte c10, byte c01, byte c11, float fx, float fy)
         {
             var lower = Mathf.Lerp(c00, c10, fx);

@@ -276,8 +276,7 @@ namespace AthmarLabs.VisionCount
             if (_inputTensor == null)
                 throw new InvalidOperationException("Unable to allocate the input tensor.");
 
-            if (_backend == BackendType.CPU)
-                _cpuInputBuffer = new float[checked(_config.ModelInputWidth * _config.ModelInputHeight * 3)];
+            _cpuInputBuffer = new float[checked(_config.ModelInputWidth * _config.ModelInputHeight * 3)];
         }
 
         private void StartRearCamera(WebCamDevice[] devices)
@@ -348,21 +347,14 @@ namespace AthmarLabs.VisionCount
         {
             EnsureRuntimeState();
 
-            if (_backend == BackendType.CPU)
-            {
-                _activeInferenceStage = "camera_to_cpu_tensor";
-                FillCpuInputTensor();
-            }
-            else
-            {
-                _activeInferenceStage = "prepare_input_transform";
-                var transform = new TextureTransform();
-                if (_config.InputLayout == ModelInputLayout.Nhwc)
-                    transform.SetTensorLayout(TensorLayout.NHWC);
-
-                _activeInferenceStage = "texture_to_tensor";
-                TextureConverter.ToTensor(_cameraTexture, _inputTensor, transform);
-            }
+            // Build the tensor on the CPU for every backend so the model sees the upright frame the
+            // operator sees (portrait phones deliver landscape, rotated sensor frames) with the
+            // correct row order. The worker itself still runs on the GPU when available.
+            var orientation = new CameraFrameOrientation(
+                _cameraTexture.videoRotationAngle,
+                _cameraTexture.videoVerticallyMirrored);
+            _activeInferenceStage = "camera_to_upright_tensor";
+            FillCpuInputTensor(orientation);
 
             _activeInferenceStage = "schedule_worker";
             _worker.Schedule(_inputTensor);
@@ -410,6 +402,20 @@ namespace AthmarLabs.VisionCount
             if (detections == null)
                 throw new InvalidOperationException("The YOLO decoder returned no detection collection.");
 
+            if (!orientation.IsIdentity)
+            {
+                // Downstream consumers (overlay, tracking, crops) use raw texture coordinates.
+                _activeInferenceStage = "map_detections_to_texture";
+                for (var index = 0; index < detections.Count; index++)
+                {
+                    var upright = detections[index];
+                    detections[index] = new Detection(
+                        upright.Sku,
+                        upright.Confidence,
+                        orientation.UprightToTexture(upright.Bounds));
+                }
+            }
+
             IReadOnlyList<Detection> detectionsToPublish = detections;
             if (_detectionPostProcessor != null && detections.Count > 0)
             {
@@ -422,7 +428,7 @@ namespace AthmarLabs.VisionCount
             _activeInferenceStage = "idle";
         }
 
-        private void FillCpuInputTensor()
+        private void FillCpuInputTensor(CameraFrameOrientation orientation)
         {
             if (_cpuInputBuffer == null)
                 throw new InvalidOperationException("CPU inference input buffer is unavailable.");
@@ -440,10 +446,11 @@ namespace AthmarLabs.VisionCount
             if (_cpuCameraPixels == null || _cpuCameraPixels.Length != requiredPixels)
                 throw new InvalidOperationException("Unable to read the current camera frame for CPU inference.");
 
-            CpuRgbTensorWriter.ResizeRgb01(
+            CpuRgbTensorWriter.WriteUprightRgb01(
                 _cpuCameraPixels,
                 sourceWidth,
                 sourceHeight,
+                orientation,
                 _config.ModelInputWidth,
                 _config.ModelInputHeight,
                 _config.InputLayout,
