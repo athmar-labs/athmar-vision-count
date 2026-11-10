@@ -6,23 +6,21 @@ using System.Linq;
 namespace AthmarLabs.VisionCount
 {
     /// <summary>
-    /// Maintains a conservative proposed count. A detection is counted once while an overlapping
-    /// track remains active. Final inventory values must still be confirmed by a human operator.
+    /// Proposes, per SKU, the largest number of products visible in the camera frame at the same
+    /// time ("what is in the picture now"). A count only becomes proposed after it is seen in two
+    /// consecutive frames no more than the track lifetime apart, so a single spurious box cannot
+    /// raise it. Moving the phone, or a product briefly dropping out of view, never adds to the
+    /// count. Final inventory values must still be confirmed by a human operator.
     /// </summary>
     public sealed class CountingEngine
     {
-        private sealed class Track
-        {
-            public NormalizedRect Bounds;
-            public double LastSeenSeconds;
-        }
-
         private readonly float _minimumConfidence;
         private readonly float _duplicateIouThreshold;
         private readonly double _trackTtlSeconds;
-        private readonly Dictionary<string, List<Track>> _tracks = new Dictionary<string, List<Track>>(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<string, int> _proposedCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<string, int> _manualCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        private Dictionary<string, int> _previousFrameCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        private double _previousFrameSeconds = double.NegativeInfinity;
 
         public CountingEngine(float minimumConfidence = 0.65f, float duplicateIouThreshold = 0.45f, double trackTtlSeconds = 1.25d)
         {
@@ -45,49 +43,50 @@ namespace AthmarLabs.VisionCount
             if (timestampSeconds < 0d)
                 throw new ArgumentOutOfRangeException(nameof(timestampSeconds));
 
-            ExpireTracks(timestampSeconds);
-
-            foreach (var detection in detections)
+            var frameCounts = CountVisible(detections);
+            var previousIsRecent = timestampSeconds - _previousFrameSeconds <= _trackTtlSeconds;
+            if (previousIsRecent)
             {
-                if (detection == null || string.IsNullOrWhiteSpace(detection.Sku) || detection.Confidence < _minimumConfidence)
-                    continue;
-
-                var sku = detection.Sku.Trim();
-                if (!_tracks.TryGetValue(sku, out var skuTracks))
+                foreach (var pair in frameCounts)
                 {
-                    skuTracks = new List<Track>();
-                    _tracks[sku] = skuTracks;
+                    if (!_previousFrameCounts.TryGetValue(pair.Key, out var previous))
+                        continue;
+
+                    var stable = Math.Min(pair.Value, previous);
+                    if (!_proposedCounts.TryGetValue(pair.Key, out var proposed) || stable > proposed)
+                        _proposedCounts[pair.Key] = stable;
                 }
-
-                Track matchingTrack = null;
-                var bestIou = 0f;
-                foreach (var track in skuTracks)
-                {
-                    var iou = track.Bounds.IntersectionOverUnion(detection.Bounds);
-                    if (iou >= _duplicateIouThreshold && iou > bestIou)
-                    {
-                        bestIou = iou;
-                        matchingTrack = track;
-                    }
-                }
-
-                if (matchingTrack != null)
-                {
-                    matchingTrack.Bounds = detection.Bounds;
-                    matchingTrack.LastSeenSeconds = timestampSeconds;
-                    continue;
-                }
-
-                skuTracks.Add(new Track
-                {
-                    Bounds = detection.Bounds,
-                    LastSeenSeconds = timestampSeconds
-                });
-
-                _proposedCounts[sku] = _proposedCounts.TryGetValue(sku, out var current) ? current + 1 : 1;
             }
 
+            _previousFrameCounts = frameCounts;
+            _previousFrameSeconds = timestampSeconds;
             return GetEffectiveCounts();
+        }
+
+        private Dictionary<string, int> CountVisible(IEnumerable<Detection> detections)
+        {
+            // Keep one box per physical product: drop same-SKU boxes overlapping a stronger one.
+            var accepted = new Dictionary<string, List<NormalizedRect>>(StringComparer.OrdinalIgnoreCase);
+            foreach (var detection in detections
+                         .Where(value => value != null && !string.IsNullOrWhiteSpace(value.Sku) && value.Confidence >= _minimumConfidence)
+                         .OrderByDescending(value => value.Confidence))
+            {
+                var sku = detection.Sku.Trim();
+                if (!accepted.TryGetValue(sku, out var boxes))
+                {
+                    boxes = new List<NormalizedRect>();
+                    accepted[sku] = boxes;
+                }
+
+                if (boxes.Any(box => box.IntersectionOverUnion(detection.Bounds) >= _duplicateIouThreshold))
+                    continue;
+                boxes.Add(detection.Bounds);
+            }
+
+            var counts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            foreach (var pair in accepted)
+                counts[pair.Key] = pair.Value.Count;
+            return counts;
         }
 
         public void SetManualCount(string sku, int count)
@@ -149,15 +148,10 @@ namespace AthmarLabs.VisionCount
 
         public void Reset()
         {
-            _tracks.Clear();
+            _previousFrameCounts.Clear();
+            _previousFrameSeconds = double.NegativeInfinity;
             _proposedCounts.Clear();
             _manualCounts.Clear();
-        }
-
-        private void ExpireTracks(double timestampSeconds)
-        {
-            foreach (var pair in _tracks)
-                pair.Value.RemoveAll(track => timestampSeconds - track.LastSeenSeconds > _trackTtlSeconds);
         }
     }
 }

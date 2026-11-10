@@ -20,15 +20,62 @@ namespace AthmarLabs.VisionCount.Tests
         }
 
         [Test]
-        public void ProcessFrame_CountsAgainAfterTrackExpires()
+        public void ProcessFrame_ReappearingProductIsNotCountedAgain()
         {
+            // Field bug: two bottles, phone moving, count climbed to 8.
             var engine = new CountingEngine(minimumConfidence: 0.5f, duplicateIouThreshold: 0.4f, trackTtlSeconds: 0.5d);
-            var detection = new Detection("SKU-1", 0.9f, new NormalizedRect(0.1f, 0.1f, 0.2f, 0.2f));
+            var left = new Detection("SKU-1", 0.9f, new NormalizedRect(0.1f, 0.1f, 0.2f, 0.2f));
+            var right = new Detection("SKU-1", 0.9f, new NormalizedRect(0.6f, 0.1f, 0.2f, 0.2f));
+            var moved = new Detection("SKU-1", 0.9f, new NormalizedRect(0.3f, 0.5f, 0.2f, 0.2f));
 
-            engine.ProcessFrame(new[] { detection }, 0d);
-            var counts = engine.ProcessFrame(new[] { detection }, 1d);
+            engine.ProcessFrame(new[] { left, right }, 0d);
+            engine.ProcessFrame(new[] { left, right }, 0.25d);
+            engine.ProcessFrame(Array.Empty<Detection>(), 0.5d);
+            engine.ProcessFrame(new[] { moved }, 2d);
+            engine.ProcessFrame(new[] { moved }, 2.25d);
+            var counts = engine.ProcessFrame(new[] { left, right }, 4d);
 
             Assert.That(counts["SKU-1"], Is.EqualTo(2));
+        }
+
+        [Test]
+        public void ProcessFrame_SingleFrameSpikeDoesNotRaiseCount()
+        {
+            var engine = new CountingEngine(minimumConfidence: 0.5f, duplicateIouThreshold: 0.4f, trackTtlSeconds: 1d);
+            var a = new Detection("SKU-1", 0.9f, new NormalizedRect(0.1f, 0.1f, 0.2f, 0.2f));
+            var b = new Detection("SKU-1", 0.9f, new NormalizedRect(0.6f, 0.1f, 0.2f, 0.2f));
+            var spurious = new Detection("SKU-1", 0.9f, new NormalizedRect(0.4f, 0.6f, 0.2f, 0.2f));
+
+            engine.ProcessFrame(new[] { a, b }, 0d);
+            engine.ProcessFrame(new[] { a, b, spurious }, 0.25d);
+            var counts = engine.ProcessFrame(new[] { a, b }, 0.5d);
+
+            Assert.That(counts["SKU-1"], Is.EqualTo(2));
+        }
+
+        [Test]
+        public void ProcessFrame_SameSkuOverlappingBoxesCountOnce()
+        {
+            var engine = new CountingEngine(minimumConfidence: 0.5f, duplicateIouThreshold: 0.4f, trackTtlSeconds: 1d);
+            var box = new Detection("SKU-1", 0.9f, new NormalizedRect(0.1f, 0.1f, 0.2f, 0.2f));
+            var overlap = new Detection("SKU-1", 0.8f, new NormalizedRect(0.11f, 0.11f, 0.2f, 0.2f));
+
+            engine.ProcessFrame(new[] { box, overlap }, 0d);
+            var counts = engine.ProcessFrame(new[] { box, overlap }, 0.25d);
+
+            Assert.That(counts["SKU-1"], Is.EqualTo(1));
+        }
+
+        [Test]
+        public void ProcessFrame_FramesFurtherApartThanTrackLifetimeDoNotConfirm()
+        {
+            var engine = new CountingEngine(minimumConfidence: 0.5f, duplicateIouThreshold: 0.4f, trackTtlSeconds: 0.5d);
+            var box = new Detection("SKU-1", 0.9f, new NormalizedRect(0.1f, 0.1f, 0.2f, 0.2f));
+
+            engine.ProcessFrame(new[] { box }, 0d);
+            var counts = engine.ProcessFrame(new[] { box }, 2d);
+
+            Assert.That(counts.ContainsKey("SKU-1"), Is.False);
         }
 
         [Test]
@@ -46,9 +93,9 @@ namespace AthmarLabs.VisionCount.Tests
         public void ManualReview_OverridesProposedCountAndCanBeConfirmed()
         {
             var engine = new CountingEngine(minimumConfidence: 0.5f);
-            engine.ProcessFrame(
-                new[] { new Detection("SKU-1", 0.9f, new NormalizedRect(0f, 0f, 0.2f, 0.2f)) },
-                0d);
+            var seen = new[] { new Detection("SKU-1", 0.9f, new NormalizedRect(0f, 0f, 0.2f, 0.2f)) };
+            engine.ProcessFrame(seen, 0d);
+            engine.ProcessFrame(seen, 0.25d);
             engine.SetManualCount("SKU-1", 3);
 
             var session = engine.BuildSession("operator-1", "aisle-a");
