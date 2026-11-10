@@ -26,6 +26,11 @@ namespace AthmarLabs.VisionCount.Editor
             var customerCode = ReadArgument("-athmarCustomerCode");
             var customerName = ReadArgument("-athmarCustomerName");
             var modelVersion = ReadOptionalArgument("-athmarModelVersion", "detect-23cls-v2");
+            var minimumConfidenceText = ReadOptionalArgument("-athmarMinimumConfidence", "0.35");
+            if (!float.TryParse(minimumConfidenceText, System.Globalization.NumberStyles.Float,
+                    System.Globalization.CultureInfo.InvariantCulture, out var minimumConfidence) ||
+                minimumConfidence <= 0f || minimumConfidence >= 1f)
+                throw new BuildFailedException("-athmarMinimumConfidence must be a number between 0 and 1.");
 
             var projectRoot = Directory.GetParent(Application.dataPath)?.FullName;
             if (string.IsNullOrWhiteSpace(projectRoot))
@@ -85,7 +90,7 @@ namespace AthmarLabs.VisionCount.Editor
                 maxDetections = 100,
                 preferGpu = true,
                 inferenceIntervalSeconds = 0.25f,
-                minimumConfidence = 0.35f,
+                minimumConfidence = minimumConfidence,
                 duplicateIouThreshold = 0.45f,
                 nonMaxSuppressionIouThreshold = 0.45f,
                 trackTtlSeconds = 1.25f,
