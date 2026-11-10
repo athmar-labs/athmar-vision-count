@@ -8,19 +8,19 @@ namespace AthmarLabs.VisionCount
     /// <summary>
     /// Proposes, per SKU, the largest number of products visible in the camera frame at the same
     /// time ("what is in the picture now"). A count only becomes proposed after it is seen in two
-    /// consecutive frames no more than the track lifetime apart, so a single spurious box cannot
-    /// raise it. Moving the phone, or a product briefly dropping out of view, never adds to the
+    /// consecutive processed frames, so a single spurious box cannot raise it. Frames are paired by
+    /// order, not by wall-clock gap: on a slow phone one inference can take longer than a second,
+    /// and a time limit there meant nothing was ever counted. Moving the phone, or a product briefly dropping out of view, never adds to the
     /// count. Final inventory values must still be confirmed by a human operator.
     /// </summary>
     public sealed class CountingEngine
     {
         private readonly float _minimumConfidence;
         private readonly float _duplicateIouThreshold;
-        private readonly double _trackTtlSeconds;
         private readonly Dictionary<string, int> _proposedCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<string, int> _manualCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         private Dictionary<string, int> _previousFrameCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-        private double _previousFrameSeconds = double.NegativeInfinity;
+        private bool _hasPreviousFrame;
 
         public CountingEngine(float minimumConfidence = 0.65f, float duplicateIouThreshold = 0.45f, double trackTtlSeconds = 1.25d)
         {
@@ -33,7 +33,6 @@ namespace AthmarLabs.VisionCount
 
             _minimumConfidence = minimumConfidence;
             _duplicateIouThreshold = duplicateIouThreshold;
-            _trackTtlSeconds = trackTtlSeconds;
         }
 
         public IReadOnlyDictionary<string, int> ProcessFrame(IEnumerable<Detection> detections, double timestampSeconds)
@@ -44,8 +43,7 @@ namespace AthmarLabs.VisionCount
                 throw new ArgumentOutOfRangeException(nameof(timestampSeconds));
 
             var frameCounts = CountVisible(detections);
-            var previousIsRecent = timestampSeconds - _previousFrameSeconds <= _trackTtlSeconds;
-            if (previousIsRecent)
+            if (_hasPreviousFrame)
             {
                 foreach (var pair in frameCounts)
                 {
@@ -59,7 +57,7 @@ namespace AthmarLabs.VisionCount
             }
 
             _previousFrameCounts = frameCounts;
-            _previousFrameSeconds = timestampSeconds;
+            _hasPreviousFrame = true;
             return GetEffectiveCounts();
         }
 
@@ -149,7 +147,7 @@ namespace AthmarLabs.VisionCount
         public void Reset()
         {
             _previousFrameCounts.Clear();
-            _previousFrameSeconds = double.NegativeInfinity;
+            _hasPreviousFrame = false;
             _proposedCounts.Clear();
             _manualCounts.Clear();
         }
