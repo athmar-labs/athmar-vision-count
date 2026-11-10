@@ -67,13 +67,27 @@ namespace AthmarLabs.VisionCount.Tests
         }
 
         [Test]
-        public void ProcessFrame_FramesFurtherApartThanTrackLifetimeDoNotConfirm()
+        public void ProcessFrame_SlowPhoneStillConfirmsConsecutiveFrames()
         {
-            var engine = new CountingEngine(minimumConfidence: 0.5f, duplicateIouThreshold: 0.4f, trackTtlSeconds: 0.5d);
-            var box = new Detection("SKU-1", 0.9f, new NormalizedRect(0.1f, 0.1f, 0.2f, 0.2f));
+            // Field bug: with the heavier cafe model one inference took longer than the track
+            // lifetime, so two bottles were boxed on screen but the count stayed empty.
+            var engine = new CountingEngine(minimumConfidence: 0.5f, duplicateIouThreshold: 0.4f, trackTtlSeconds: 1.25d);
+            var left = new Detection("SKU-1", 0.63f, new NormalizedRect(0.2f, 0.4f, 0.1f, 0.3f));
+            var right = new Detection("SKU-1", 0.74f, new NormalizedRect(0.5f, 0.4f, 0.1f, 0.3f));
 
-            engine.ProcessFrame(new[] { box }, 0d);
-            var counts = engine.ProcessFrame(new[] { box }, 2d);
+            engine.ProcessFrame(new[] { left, right }, 0d);
+            var counts = engine.ProcessFrame(new[] { left, right }, 2.5d);
+
+            Assert.That(counts["SKU-1"], Is.EqualTo(2));
+        }
+
+        [Test]
+        public void ProcessFrame_FirstFrameAloneDoesNotCount()
+        {
+            var engine = new CountingEngine(minimumConfidence: 0.5f);
+            var counts = engine.ProcessFrame(
+                new[] { new Detection("SKU-1", 0.9f, new NormalizedRect(0.1f, 0.1f, 0.2f, 0.2f)) },
+                0d);
 
             Assert.That(counts.ContainsKey("SKU-1"), Is.False);
         }

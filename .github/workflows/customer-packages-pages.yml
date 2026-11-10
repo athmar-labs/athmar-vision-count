@@ -32,13 +32,14 @@ env:
   DEMO_PACKAGE_BASE_URL: https://athmar-labs.github.io/athmar-vision-count/demo-customer-v1
   FOOD_PACKAGE_BASE_URL: https://athmar-labs.github.io/athmar-vision-count/athmar-food-v1
   # Stock Ultralytics weights exported in CI (no model binary in Git).
-  # Open Images V7 YOLOv8s: 601 classes incl. coffee cup, mug, plate, serving tray, pastries.
+  # Open Images V7 YOLOv8n: 601 classes incl. coffee cup, mug, plate, serving tray, pastries.
+  # YOLOv8s-oiv7 was too slow on the field phone (>1.25 s per frame); n is about 2x faster.
   # Its scores run lower than COCO's, hence the 0.25 threshold.
   # Rollback to COCO: yolov8n.pt / 84 / coco80_sku_catalogue.csv / 0.35.
   FOOD_ULTRALYTICS_VERSION: 8.4.208
-  FOOD_BASE_WEIGHTS: yolov8s-oiv7.pt
+  FOOD_BASE_WEIGHTS: yolov8n-oiv7.pt
   FOOD_OUTPUT_CHANNELS: 605
-  FOOD_MODEL_VERSION: oiv7-yolov8s-cafe-v4
+  FOOD_MODEL_VERSION: oiv7-yolov8n-cafe-v5
   FOOD_MINIMUM_CONFIDENCE: '0.25'
   FOOD_CATALOGUE_PATH: pilot/athmar-food/oiv7_cafe_sku_catalogue.csv
 
