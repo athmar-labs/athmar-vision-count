@@ -1,4 +1,4 @@
-# Open Images V7 (YOLOv8s-oiv7, 601 classes). Only cafe/restaurant items are listed;
+# Open Images V7 (YOLOv8n-oiv7, 601 classes). Only cafe/restaurant items are listed;
 # unlisted classes are ignored. Broad parent classes (Food, Drink, Container...) are left
 # out on purpose: Open Images is hierarchical and they would double-count items.
 label_index,sku,name_en,name_ar,active
