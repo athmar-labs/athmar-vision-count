@@ -28,7 +28,7 @@ namespace AthmarLabs.VisionCount
         private Font _font;
         private string _language = "en";
         private RawImage _cameraImage;
-        private AspectRatioFitter _cameraAspect;
+        private CameraViewportLayout? _cameraLayout;
         private RectTransform _detectionLayer;
         private Text _titleText;
         private Text _statusText;
@@ -101,12 +101,32 @@ namespace AthmarLabs.VisionCount
             if (texture == null)
                 return;
 
-            var rotated = Math.Abs(rotationAngle) == 90 || Math.Abs(rotationAngle) == 270;
-            _cameraAspect.aspectRatio = rotated
-                ? texture.height / (float)Math.Max(1, texture.width)
-                : texture.width / (float)Math.Max(1, texture.height);
             _cameraImage.rectTransform.localEulerAngles = new Vector3(0f, 0f, -rotationAngle);
             _cameraImage.uvRect = verticallyMirrored ? new Rect(0f, 1f, 1f, -1f) : new Rect(0f, 0f, 1f, 1f);
+
+            // Size the preview for its rotated, upright appearance. An AspectRatioFitter sizes the
+            // rect before rotation, which squeezed portrait camera frames into a landscape box.
+            var panel = _cameraImage.rectTransform.parent as RectTransform;
+            var panelSize = panel == null ? Vector2.zero : panel.rect.size;
+            if (texture.width <= 16 || texture.height <= 16 || panelSize.x <= 0f || panelSize.y <= 0f)
+            {
+                _cameraLayout = null;
+                return;
+            }
+
+            var layout = new CameraViewportLayout(
+                texture.width,
+                texture.height,
+                new CameraFrameOrientation(rotationAngle, verticallyMirrored),
+                panelSize.x,
+                panelSize.y);
+            var rect = _cameraImage.rectTransform;
+            rect.anchorMin = new Vector2(0.5f, 0.5f);
+            rect.anchorMax = new Vector2(0.5f, 0.5f);
+            rect.pivot = new Vector2(0.5f, 0.5f);
+            rect.anchoredPosition = Vector2.zero;
+            rect.sizeDelta = new Vector2(layout.UnrotatedWidth, layout.UnrotatedHeight);
+            _cameraLayout = layout;
         }
 
         public void ShowDetections(IReadOnlyList<Detection> detections, SkuCatalogue catalogue)
@@ -123,9 +143,13 @@ namespace AthmarLabs.VisionCount
                     continue;
 
                 var detection = detections[index];
+                // Detections arrive in raw texture coordinates; place them on the rotated preview.
+                var bounds = _cameraLayout.HasValue
+                    ? _cameraLayout.Value.TextureBoxToPanel(detection.Bounds)
+                    : detection.Bounds;
                 var rect = widget.Root.GetComponent<RectTransform>();
-                rect.anchorMin = new Vector2(detection.Bounds.X, 1f - detection.Bounds.Y - detection.Bounds.Height);
-                rect.anchorMax = new Vector2(detection.Bounds.X + detection.Bounds.Width, 1f - detection.Bounds.Y);
+                rect.anchorMin = new Vector2(bounds.X, 1f - bounds.Y - bounds.Height);
+                rect.anchorMax = new Vector2(bounds.X + bounds.Width, 1f - bounds.Y);
                 rect.offsetMin = Vector2.zero;
                 rect.offsetMax = Vector2.zero;
                 widget.Label.text = catalogue.ResolveDisplayName(detection.Sku, _language) + " " + detection.Confidence.ToString("P0");
@@ -233,9 +257,6 @@ namespace AthmarLabs.VisionCount
             Stretch(cameraRect);
             _cameraImage = cameraRect.gameObject.AddComponent<RawImage>();
             _cameraImage.color = Color.white;
-            _cameraAspect = cameraRect.gameObject.AddComponent<AspectRatioFitter>();
-            _cameraAspect.aspectMode = AspectRatioFitter.AspectMode.FitInParent;
-            _cameraAspect.aspectRatio = 16f / 9f;
 
             _detectionLayer = CreateRect("DetectionLayer", cameraPanel);
             Stretch(_detectionLayer);
