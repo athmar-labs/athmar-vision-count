@@ -17,6 +17,7 @@ on:
       - Assets/AthmarVisionCount/Runtime/CustomerPackageStore.cs
       - Assets/AthmarVisionCount/Runtime/SkuCatalogue.cs
       - Assets/AthmarVisionCount/Runtime/YoloOutputDecoder.cs
+      - pilot/athmar-food/**
       - Packages/**
       - ProjectSettings/**
 
@@ -30,8 +31,12 @@ env:
   PAGES_ROOT_URL: https://athmar-labs.github.io/athmar-vision-count
   DEMO_PACKAGE_BASE_URL: https://athmar-labs.github.io/athmar-vision-count/demo-customer-v1
   FOOD_PACKAGE_BASE_URL: https://athmar-labs.github.io/athmar-vision-count/athmar-food-v1
-  FOOD_MODEL_URL: https://raw.githubusercontent.com/MoatasimFaroog1111/athmar-food-training/main/best_detect.onnx
-  FOOD_CATALOGUE_URL: https://raw.githubusercontent.com/MoatasimFaroog1111/athmar-food-training/main/sku_catalogue_detect.csv
+  # Stock COCO YOLOv8n, exported in CI (no model binary in Git). The custom 23-class
+  # best_detect.onnx missed a clearly visible water bottle that stock YOLOv8n finds at 0.85.
+  FOOD_ULTRALYTICS_VERSION: 8.4.208
+  FOOD_BASE_WEIGHTS: yolov8n.pt
+  FOOD_MODEL_VERSION: coco80-yolov8n-v3
+  FOOD_CATALOGUE_PATH: pilot/athmar-food/coco80_sku_catalogue.csv
 
 concurrency:
   group: customer-packages-pages
@@ -135,12 +140,35 @@ jobs:
           sudo apt-get clean
           docker system prune --all --force --volumes || true
 
-      - name: Download trained model and catalogue
+      - name: Set up Python for model export
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: '3.12'
+
+      - name: Export YOLOv8n to ONNX and stage the catalogue
         shell: bash
         run: |
-          mkdir -p Build/athmar-inputs
-          curl --fail --silent --show-error --location "$FOOD_MODEL_URL" -o Build/athmar-inputs/best_detect.onnx
-          curl --fail --silent --show-error --location "$FOOD_CATALOGUE_URL" -o Build/athmar-inputs/sku_catalogue.csv
+          python -m venv /tmp/export-venv
+          /tmp/export-venv/bin/pip install --quiet --index-url https://download.pytorch.org/whl/cpu torch torchvision
+          /tmp/export-venv/bin/pip install --quiet "ultralytics==${FOOD_ULTRALYTICS_VERSION}" onnx onnxslim onnxruntime
+          mkdir -p Build/athmar-inputs /tmp/export-work
+          cd /tmp/export-work
+          /tmp/export-venv/bin/python - <<'PY'
+          import os, shutil
+          import onnxruntime as ort
+          from ultralytics import YOLO
+          path = YOLO(os.environ["FOOD_BASE_WEIGHTS"]).export(
+              format="onnx", imgsz=640, simplify=True, nms=False, dynamic=False, batch=1)
+          session = ort.InferenceSession(path)
+          inputs, outputs = session.get_inputs()[0].shape, session.get_outputs()[0].shape
+          print("input", inputs, "output", outputs)
+          assert inputs == [1, 3, 640, 640], inputs
+          assert outputs == [1, 84, 8400], outputs
+          shutil.copy(path, os.path.join(os.environ["GITHUB_WORKSPACE"], "Build/athmar-inputs/best_detect.onnx"))
+          PY
+          cd "$GITHUB_WORKSPACE"
+          cp "$FOOD_CATALOGUE_PATH" Build/athmar-inputs/sku_catalogue.csv
+          rm -rf /tmp/export-venv /tmp/export-work ~/.cache/pip
           ls -la Build/athmar-inputs
 
       - name: Verify Unity activation secrets
@@ -171,6 +199,7 @@ jobs:
             -athmarCataloguePath Build/athmar-inputs/sku_catalogue.csv
             -athmarCustomerCode ATHMAR-FOOD-PILOT
             -athmarCustomerName Athmar-Food-Pilot
+            -athmarModelVersion ${{ env.FOOD_MODEL_VERSION }}
           runAsHostUser: true
 
       - name: Validate generated install values

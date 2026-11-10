@@ -1,0 +1,81 @@
+label_index,sku,name_en,name_ar,active
+0,person,Person,شخص,false
+1,bicycle,Bicycle,دراجة,false
+2,car,Car,سيارة,false
+3,motorcycle,Motorcycle,دراجة نارية,false
+4,airplane,Airplane,طائرة,false
+5,bus,Bus,حافلة,false
+6,train,Train,قطار,false
+7,truck,Truck,شاحنة,false
+8,boat,Boat,قارب,false
+9,traffic_light,Traffic Light,إشارة مرور,false
+10,fire_hydrant,Fire Hydrant,صنبور حريق,false
+11,stop_sign,Stop Sign,لافتة توقف,false
+12,parking_meter,Parking Meter,عداد مواقف,false
+13,bench,Bench,مقعد,false
+14,bird,Bird,طائر,false
+15,cat,Cat,قطة,false
+16,dog,Dog,كلب,false
+17,horse,Horse,حصان,false
+18,sheep,Sheep,خروف,false
+19,cow,Cow,بقرة,false
+20,elephant,Elephant,فيل,false
+21,bear,Bear,دب,false
+22,zebra,Zebra,حمار وحشي,false
+23,giraffe,Giraffe,زرافة,false
+24,backpack,Backpack,حقيبة ظهر,false
+25,umbrella,Umbrella,مظلة,false
+26,handbag,Handbag,حقيبة يد,false
+27,tie,Tie,ربطة عنق,false
+28,suitcase,Suitcase,حقيبة سفر,false
+29,frisbee,Frisbee,قرص طائر,false
+30,skis,Skis,زلاجات,false
+31,snowboard,Snowboard,لوح تزلج,false
+32,sports_ball,Sports Ball,كرة,false
+33,kite,Kite,طائرة ورقية,false
+34,baseball_bat,Baseball Bat,مضرب بيسبول,false
+35,baseball_glove,Baseball Glove,قفاز بيسبول,false
+36,skateboard,Skateboard,لوح تزلج بعجلات,false
+37,surfboard,Surfboard,لوح ركوب أمواج,false
+38,tennis_racket,Tennis Racket,مضرب تنس,false
+39,bottle,Water Bottle,قارورة ماء,true
+40,wine_glass,Glass,كأس,true
+41,cup,Cup,فنجان / كوب,true
+42,fork,Fork,شوكة,true
+43,knife,Knife,سكين,true
+44,spoon,Spoon,ملعقة,true
+45,bowl,Bowl,وعاء / زبدية,true
+46,banana,Banana,موز,true
+47,apple,Apple,تفاح,true
+48,sandwich,Sandwich,ساندويتش,true
+49,orange,Orange,برتقال,true
+50,broccoli,Broccoli,بروكلي,true
+51,carrot,Carrot,جزر,true
+52,hot_dog,Hot Dog,هوت دوغ,true
+53,pizza,Pizza,بيتزا,true
+54,donut,Donut,دونات,true
+55,cake,Cake,كيك,true
+56,chair,Chair,كرسي,false
+57,couch,Couch,أريكة,false
+58,potted_plant,Potted Plant,نبتة,false
+59,bed,Bed,سرير,false
+60,dining_table,Dining Table,طاولة طعام,true
+61,toilet,Toilet,مرحاض,false
+62,tv,TV,تلفاز,false
+63,laptop,Laptop,حاسوب محمول,false
+64,mouse,Mouse,فأرة حاسوب,false
+65,remote,Remote,جهاز تحكم,false
+66,keyboard,Keyboard,لوحة مفاتيح,false
+67,cell_phone,Cell Phone,هاتف محمول,false
+68,microwave,Microwave,ميكروويف,true
+69,oven,Oven,فرن,true
+70,toaster,Toaster,محمصة خبز,true
+71,sink,Sink,مغسلة,true
+72,refrigerator,Refrigerator,ثلاجة,true
+73,book,Book,كتاب,false
+74,clock,Clock,ساعة,false
+75,vase,Vase,مزهرية,false
+76,scissors,Scissors,مقص,false
+77,teddy_bear,Teddy Bear,دمية دب,false
+78,hair_drier,Hair Drier,مجفف شعر,false
+79,toothbrush,Toothbrush,فرشاة أسنان,false

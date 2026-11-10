@@ -354,7 +354,13 @@ namespace AthmarLabs.VisionCount
                 _cameraTexture.videoRotationAngle,
                 _cameraTexture.videoVerticallyMirrored);
             _activeInferenceStage = "camera_to_upright_tensor";
-            FillCpuInputTensor(orientation);
+            var letterbox = TensorLetterbox.ForCamera(
+                _cameraTexture.width,
+                _cameraTexture.height,
+                orientation,
+                _config.ModelInputWidth,
+                _config.ModelInputHeight);
+            FillCpuInputTensor(orientation, letterbox);
 
             _activeInferenceStage = "schedule_worker";
             _worker.Schedule(_inputTensor);
@@ -402,18 +408,23 @@ namespace AthmarLabs.VisionCount
             if (detections == null)
                 throw new InvalidOperationException("The YOLO decoder returned no detection collection.");
 
-            if (!orientation.IsIdentity)
+            // Boxes come back relative to the letterboxed tensor. Downstream consumers (overlay,
+            // tracking, crops) use raw texture coordinates: undo the padding, then the rotation.
+            _activeInferenceStage = "map_detections_to_texture";
+            for (var index = detections.Count - 1; index >= 0; index--)
             {
-                // Downstream consumers (overlay, tracking, crops) use raw texture coordinates.
-                _activeInferenceStage = "map_detections_to_texture";
-                for (var index = 0; index < detections.Count; index++)
+                var tensorSpace = detections[index];
+                var upright = letterbox.TensorToUpright(tensorSpace.Bounds);
+                if (upright.Width <= 0f || upright.Height <= 0f)
                 {
-                    var upright = detections[index];
-                    detections[index] = new Detection(
-                        upright.Sku,
-                        upright.Confidence,
-                        orientation.UprightToTexture(upright.Bounds));
+                    detections.RemoveAt(index);
+                    continue;
                 }
+
+                detections[index] = new Detection(
+                    tensorSpace.Sku,
+                    tensorSpace.Confidence,
+                    orientation.UprightToTexture(upright));
             }
 
             IReadOnlyList<Detection> detectionsToPublish = detections;
@@ -428,7 +439,7 @@ namespace AthmarLabs.VisionCount
             _activeInferenceStage = "idle";
         }
 
-        private void FillCpuInputTensor(CameraFrameOrientation orientation)
+        private void FillCpuInputTensor(CameraFrameOrientation orientation, TensorLetterbox letterbox)
         {
             if (_cpuInputBuffer == null)
                 throw new InvalidOperationException("CPU inference input buffer is unavailable.");
@@ -454,7 +465,8 @@ namespace AthmarLabs.VisionCount
                 _config.ModelInputWidth,
                 _config.ModelInputHeight,
                 _config.InputLayout,
-                _cpuInputBuffer);
+                _cpuInputBuffer,
+                letterbox);
             _inputTensor.Upload(_cpuInputBuffer);
         }
 

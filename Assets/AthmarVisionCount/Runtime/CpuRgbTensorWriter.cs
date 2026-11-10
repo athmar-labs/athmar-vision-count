@@ -94,6 +94,26 @@ namespace AthmarLabs.VisionCount
             ModelInputLayout layout,
             float[] destination)
         {
+            WriteUprightRgb01(
+                bottomOriginSource, sourceWidth, sourceHeight, orientation,
+                targetWidth, targetHeight, layout, destination, null);
+        }
+
+        /// <summary>
+        /// Same as above, but fits the upright frame into the tensor with aspect-preserving grey
+        /// padding (letterbox) when <paramref name="letterbox"/> is given, as YOLO models expect.
+        /// </summary>
+        public static void WriteUprightRgb01(
+            Color32[] bottomOriginSource,
+            int sourceWidth,
+            int sourceHeight,
+            CameraFrameOrientation orientation,
+            int targetWidth,
+            int targetHeight,
+            ModelInputLayout layout,
+            float[] destination,
+            TensorLetterbox? letterbox)
+        {
             if (bottomOriginSource == null)
                 throw new ArgumentNullException(nameof(bottomOriginSource));
             if (destination == null)
@@ -105,13 +125,33 @@ namespace AthmarLabs.VisionCount
             if (destination.Length != checked(targetWidth * targetHeight * 3))
                 throw new ArgumentException("Destination buffer must contain exactly targetWidth * targetHeight * 3 floats.", nameof(destination));
 
+            if (letterbox.HasValue &&
+                (letterbox.Value.TensorWidth != targetWidth || letterbox.Value.TensorHeight != targetHeight))
+                throw new ArgumentException("Letterbox geometry does not match the target tensor size.", nameof(letterbox));
+
             var planeSize = targetWidth * targetHeight;
             for (var y = 0; y < targetHeight; y++)
             {
-                var uprightY = (y + 0.5f) / targetHeight;
                 for (var x = 0; x < targetWidth; x++)
                 {
-                    var uprightX = (x + 0.5f) / targetWidth;
+                    var pixelIndex = (y * targetWidth) + x;
+                    float uprightX;
+                    float uprightY;
+                    if (letterbox.HasValue)
+                    {
+                        if (!letterbox.Value.TryTensorPixelToUpright(x, y, out uprightX, out uprightY))
+                        {
+                            WritePixel(destination, layout, planeSize, pixelIndex,
+                                TensorLetterbox.PadValue, TensorLetterbox.PadValue, TensorLetterbox.PadValue);
+                            continue;
+                        }
+                    }
+                    else
+                    {
+                        uprightX = (x + 0.5f) / targetWidth;
+                        uprightY = (y + 0.5f) / targetHeight;
+                    }
+
                     orientation.UprightToTexture(uprightX, uprightY, out var textureX, out var textureY);
 
                     var sourceX = Mathf.Clamp((textureX * sourceWidth) - 0.5f, 0f, sourceWidth - 1f);
@@ -133,22 +173,25 @@ namespace AthmarLabs.VisionCount
                     var r = BilinearChannel(c00.r, c10.r, c01.r, c11.r, fx, fy);
                     var g = BilinearChannel(c00.g, c10.g, c01.g, c11.g, fx, fy);
                     var b = BilinearChannel(c00.b, c10.b, c01.b, c11.b, fx, fy);
-                    var pixelIndex = (y * targetWidth) + x;
-
-                    if (layout == ModelInputLayout.Nhwc)
-                    {
-                        var destinationIndex = pixelIndex * 3;
-                        destination[destinationIndex] = r;
-                        destination[destinationIndex + 1] = g;
-                        destination[destinationIndex + 2] = b;
-                    }
-                    else
-                    {
-                        destination[pixelIndex] = r;
-                        destination[planeSize + pixelIndex] = g;
-                        destination[(planeSize * 2) + pixelIndex] = b;
-                    }
+                    WritePixel(destination, layout, planeSize, pixelIndex, r, g, b);
                 }
+            }
+        }
+
+        private static void WritePixel(float[] destination, ModelInputLayout layout, int planeSize, int pixelIndex, float r, float g, float b)
+        {
+            if (layout == ModelInputLayout.Nhwc)
+            {
+                var destinationIndex = pixelIndex * 3;
+                destination[destinationIndex] = r;
+                destination[destinationIndex + 1] = g;
+                destination[destinationIndex + 2] = b;
+            }
+            else
+            {
+                destination[pixelIndex] = r;
+                destination[planeSize + pixelIndex] = g;
+                destination[(planeSize * 2) + pixelIndex] = b;
             }
         }
 

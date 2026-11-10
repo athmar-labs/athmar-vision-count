@@ -25,6 +25,7 @@ namespace AthmarLabs.VisionCount.Editor
             var cataloguePath = ReadArgument("-athmarCataloguePath");
             var customerCode = ReadArgument("-athmarCustomerCode");
             var customerName = ReadArgument("-athmarCustomerName");
+            var modelVersion = ReadOptionalArgument("-athmarModelVersion", "detect-23cls-v2");
 
             var projectRoot = Directory.GetParent(Application.dataPath)?.FullName;
             if (string.IsNullOrWhiteSpace(projectRoot))
@@ -66,8 +67,8 @@ namespace AthmarLabs.VisionCount.Editor
                 customerCode = customerCode,
                 customerName = customerName,
                 defaultLanguage = "ar",
-                modelVersion = "detect-23cls-v2",
-                catalogueVersion = "detect-23cls-v2",
+                modelVersion = modelVersion,
+                catalogueVersion = modelVersion,
                 privacyNoticeVersion = "approved-1",
                 modelUrl = baseUrl + "/" + ModelFileName,
                 modelSha256 = CustomerPackageStore.ComputeFileSha256(sentisPath),
@@ -137,6 +138,18 @@ namespace AthmarLabs.VisionCount.Editor
             }
 
             throw new BuildFailedException($"Required command-line argument {name} is missing.");
+        }
+
+        private static string ReadOptionalArgument(string name, string fallback)
+        {
+            var arguments = Environment.GetCommandLineArgs();
+            for (var index = 0; index < arguments.Length - 1; index++)
+            {
+                if (string.Equals(arguments[index], name, StringComparison.Ordinal))
+                    return arguments[index + 1].Trim();
+            }
+
+            return fallback;
         }
 
         private static string RequireHttpsBaseUrl(string value)
