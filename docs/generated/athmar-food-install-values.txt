@@ -1,2 +1,2 @@
 Manifest URL: https://athmar-labs.github.io/athmar-vision-count/athmar-food-v1/manifest.json
-Manifest SHA-256: 09c26ffc332ce958128cd5b8d443db710efea0e3188b76d756d4c86c094eeb83
+Manifest SHA-256: 3406f64867222224779948d28d65daae1f929baebce2d9c42e730b2dc81518aa
