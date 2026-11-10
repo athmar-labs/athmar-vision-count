@@ -87,6 +87,15 @@ namespace AthmarLabs.VisionCount
             }
         }
 
+        public NormalizedRect TextureToUpright(NormalizedRect texture)
+        {
+            TextureToUpright(texture.X, texture.Y, out var ax, out var ay);
+            TextureToUpright(texture.X + texture.Width, texture.Y + texture.Height, out var bx, out var by);
+            var left = Math.Min(ax, bx);
+            var top = Math.Min(ay, by);
+            return new NormalizedRect(left, top, Math.Abs(bx - ax), Math.Abs(by - ay));
+        }
+
         public NormalizedRect UprightToTexture(NormalizedRect upright)
         {
             UprightToTexture(upright.X, upright.Y, out var ax, out var ay);
