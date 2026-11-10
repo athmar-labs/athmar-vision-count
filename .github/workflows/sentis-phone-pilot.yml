@@ -44,6 +44,12 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
+      # The runner's default Python moved to 3.14, which has no wheels for the pinned
+      # numpy 1.26.4 / onnx 1.17.0; onnx then fails to build from source.
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: '3.12'
+
       - name: Prepare pinned generic embedding model
         shell: bash
         run: |
