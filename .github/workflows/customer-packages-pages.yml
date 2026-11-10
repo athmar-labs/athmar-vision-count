@@ -31,12 +31,16 @@ env:
   PAGES_ROOT_URL: https://athmar-labs.github.io/athmar-vision-count
   DEMO_PACKAGE_BASE_URL: https://athmar-labs.github.io/athmar-vision-count/demo-customer-v1
   FOOD_PACKAGE_BASE_URL: https://athmar-labs.github.io/athmar-vision-count/athmar-food-v1
-  # Stock COCO YOLOv8n, exported in CI (no model binary in Git). The custom 23-class
-  # best_detect.onnx missed a clearly visible water bottle that stock YOLOv8n finds at 0.85.
+  # Stock Ultralytics weights exported in CI (no model binary in Git).
+  # Open Images V7 YOLOv8s: 601 classes incl. coffee cup, mug, plate, serving tray, pastries.
+  # Its scores run lower than COCO's, hence the 0.25 threshold.
+  # Rollback to COCO: yolov8n.pt / 84 / coco80_sku_catalogue.csv / 0.35.
   FOOD_ULTRALYTICS_VERSION: 8.4.208
-  FOOD_BASE_WEIGHTS: yolov8n.pt
-  FOOD_MODEL_VERSION: coco80-yolov8n-v3
-  FOOD_CATALOGUE_PATH: pilot/athmar-food/coco80_sku_catalogue.csv
+  FOOD_BASE_WEIGHTS: yolov8s-oiv7.pt
+  FOOD_OUTPUT_CHANNELS: 605
+  FOOD_MODEL_VERSION: oiv7-yolov8s-cafe-v4
+  FOOD_MINIMUM_CONFIDENCE: '0.25'
+  FOOD_CATALOGUE_PATH: pilot/athmar-food/oiv7_cafe_sku_catalogue.csv
 
 concurrency:
   group: customer-packages-pages
@@ -163,7 +167,7 @@ jobs:
           inputs, outputs = session.get_inputs()[0].shape, session.get_outputs()[0].shape
           print("input", inputs, "output", outputs)
           assert inputs == [1, 3, 640, 640], inputs
-          assert outputs == [1, 84, 8400], outputs
+          assert outputs == [1, int(os.environ["FOOD_OUTPUT_CHANNELS"]), 8400], outputs
           shutil.copy(path, os.path.join(os.environ["GITHUB_WORKSPACE"], "Build/athmar-inputs/best_detect.onnx"))
           PY
           cd "$GITHUB_WORKSPACE"
@@ -200,6 +204,7 @@ jobs:
             -athmarCustomerCode ATHMAR-FOOD-PILOT
             -athmarCustomerName Athmar-Food-Pilot
             -athmarModelVersion ${{ env.FOOD_MODEL_VERSION }}
+            -athmarMinimumConfidence ${{ env.FOOD_MINIMUM_CONFIDENCE }}
           runAsHostUser: true
 
       - name: Validate generated install values

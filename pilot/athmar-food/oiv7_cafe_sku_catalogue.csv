@@ -1,0 +1,91 @@
+# Open Images V7 (YOLOv8s-oiv7, 601 classes). Only cafe/restaurant items are listed;
+# unlisted classes are ignored. Broad parent classes (Food, Drink, Container...) are left
+# out on purpose: Open Images is hierarchical and they would double-count items.
+label_index,sku,name_en,name_ar,active
+10,apple,Apple,تفاح,true
+16,bagel,Bagel,بيغل,true
+21,banana,Banana,موز,true
+37,beer,Beer,بيرة,true
+39,bell_pepper,Bell pepper,فلفل رومي,true
+57,bottle,Bottle,قارورة,true
+60,bowl,Bowl,وعاء / زبدية,true
+62,box,Box,علبة / صندوق,true
+65,bread,Bread,خبز,true
+72,burrito,Burrito,بوريتو,true
+78,cake,Cake,كيك,true
+79,cake_stand,Cake stand,حامل كيك,true
+86,candy,Candy,حلوى,true
+92,carrot,Carrot,جزر,true
+105,cheese,Cheese,جبن,true
+111,chopsticks,Chopsticks,عيدان أكل,true
+117,cocktail,Cocktail,كوكتيل,true
+118,cocktail_shaker,Cocktail shaker,خلاط مشروبات,true
+120,coffee,Coffee,قهوة,true
+121,coffee_cup,Coffee cup,فنجان قهوة,true
+132,cookie,Cookie,كوكيز,true
+140,cream,Cream,كريمة,true
+143,croissant,Croissant,كرواسون,true
+146,cucumber,Cucumber,خيار,true
+149,cutting_board,Cutting board,لوح تقطيع,true
+166,doughnut,Doughnut,دونات,true
+172,drinking_straw,Drinking straw,مصاصة,true
+178,egg_food,Egg (Food),بيض,true
+204,fork,Fork,شوكة,true
+207,french_fries,French fries,بطاطس مقلية,true
+211,frying_pan,Frying pan,مقلاة,true
+226,grape,Grape,عنب,true
+233,hamburger,Hamburger,برغر,true
+256,hot_dog,Hot dog,هوت دوغ,true
+273,ice_cream,Ice cream,آيس كريم,true
+286,jug,Jug,دورق,true
+287,juice,Juice,عصير,true
+289,kettle,Kettle,غلاية,true
+292,kitchen_knife,Kitchen knife,سكين مطبخ,true
+296,knife,Knife,سكين,true
+299,ladle,Ladle,مغرفة,true
+306,lemon,Lemon,ليمون,true
+323,mango,Mango,مانجو,true
+328,measuring_cup,Measuring cup,كوب قياس,true
+333,milk,Milk,حليب,true
+338,mixing_bowl,Mixing bowl,وعاء خلط,true
+344,muffin,Muffin,مافن,true
+345,mug,Mug,كوب,true
+347,mushroom,Mushroom,فطر,true
+356,orange,Orange,برتقال,true
+365,pancake,Pancake,بان كيك,true
+368,paper_towel,Paper towel,مناديل ورقية,true
+372,pasta,Pasta,معكرونة,true
+373,pastry,Pastry,معجنات,true
+374,peach,Peach,خوخ,true
+375,pear,Pear,كمثرى,true
+389,pineapple,Pineapple,أناناس,true
+390,pitcher_container,Pitcher (Container),إبريق,true
+391,pizza,Pizza,بيتزا,true
+394,plastic_bag,Plastic bag,كيس بلاستيك,true
+395,plate,Plate,صحن,true
+396,platter,Platter,طبق تقديم,true
+400,popcorn,Popcorn,فشار,true
+404,potato,Potato,بطاطس,true
+407,pretzel,Pretzel,بريتزل,true
+430,salad,Salad,سلطة,true
+431,salt_and_pepper_shakers,Salt and pepper shakers,مملحة وفلفلة,true
+433,sandwich,Sandwich,ساندويتش,true
+434,saucer,Saucer,صحن فنجان,true
+449,serving_tray,Serving tray,صينية تقديم,true
+480,spatula,Spatula,ملعقة تقليب,true
+483,spoon,Spoon,ملعقة,true
+496,strawberry,Strawberry,فراولة,true
+501,submarine_sandwich,Submarine sandwich,ساندويتش صب,true
+507,sushi,Sushi,سوشي,true
+518,taco,Taco,تاكو,true
+521,tart,Tart,تارت,true
+523,tea,Tea,شاي,true
+524,teapot,Teapot,إبريق شاي,true
+535,tin_can,Tin can,علبة معدنية,true
+540,tomato,Tomato,طماطم,true
+571,waffle,Waffle,وافل,true
+579,watermelon,Watermelon,بطيخ,true
+584,whisk,Whisk,مضرب بيض,true
+589,wine,Wine,نبيذ,true
+590,wine_glass,Wine glass,كأس,true
+593,wok,Wok,مقلاة ووك,true
