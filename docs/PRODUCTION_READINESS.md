@@ -40,11 +40,11 @@ A paid deployment must not be represented as production-ready until every applic
 
 ### Model and data
 
-- Obtain written rights for the model, training/tuning data, labels and customer examples.
+- Record the exact checkpoint, export format, model and data provenance, and written distribution rights before approval. For a proprietary deployment using Ultralytics YOLO, verify the applicable terms against [Ultralytics licensing](https://www.ultralytics.com/license) and retain evidence that covers the deployed weights and distribution channel.
 - Publish an immutable approved runtime package according to `docs/RUNTIME_CUSTOMER_PACKAGES.md`.
 - Deliver the manifest SHA-256 through a trusted channel separate from or protected relative to the download URL.
 - Verify model preprocessing, tensor layout, probability outputs and label mapping with known fixtures.
-- Measure per-SKU accuracy against manually verified held-out ground truth.
+- Measure pre-review count accuracy per SKU and exact counts per session using the [held-out scoring procedure](COMMERCIAL_PILOT.md#scoring-held-out-count-proposals).
 - Document false-positive, false-negative and duplicate-count behavior.
 - Define supported device, lighting, distance, packaging, occlusion, thermal and memory limits.
 

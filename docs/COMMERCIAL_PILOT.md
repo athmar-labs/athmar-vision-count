@@ -69,3 +69,55 @@ Results must be calculated from the agreed held-out acceptance sessions, not tra
 ## Production conversion
 
 A successful pilot does not automatically authorize broad production use. Production conversion requires a signed production license/SOW, approved support model, release and rollback process, confirmed device fleet, customer-specific privacy documentation, final acceptance thresholds and a new signed build.
+
+## Scoring held-out count proposals
+
+Freeze the acceptance policy before collecting results. Record the APK version and hash,
+manifest hash, device and Android version, site conditions and sampling plan with the
+test evidence. Use separate reports for each device or environment that must pass on its
+own. Store the policy, raw observations and report with the customer's acceptance record.
+
+Create a UTF-8 CSV with the following fields:
+
+```csv
+session_id,sku,expected_count,proposed_count
+session-001,SKU-A,5,4
+session-001,SKU-B,0,0
+session-002,SKU-A,0,0
+session-002,SKU-B,3,3
+```
+
+Record manually verified ground truth independently and capture the app's proposal
+before correction. Include each approved SKU exactly once in every session, entering
+zero for absence or a missing prediction. Use the same SKU identifiers as the approved
+catalogue. A proposed SKU outside the approved scope is a data or configuration
+exception to investigate before scoring. Keep customer session files outside the repository.
+
+Example policy JSON for the two-session illustration above. Set actual minimum sample
+sizes and thresholds with the customer before collecting held-out sessions.
+
+```json
+{
+  "skus": ["SKU-A", "SKU-B"],
+  "min_sessions": 2,
+  "min_positive_sessions_per_sku": 1,
+  "min_absent_sessions_per_sku": 1,
+  "min_session_exact_rate": 0.95,
+  "max_sku_weighted_absolute_error": 0.10,
+  "max_sku_false_positive_rate": 0.05
+}
+```
+
+```bash
+python tools/pilot_acceptance/evaluate.py policy.json counts.csv > acceptance-report.json
+```
+
+Exit code 0 means every configured check passed, 1 means a check failed, and 2
+means the input was invalid. The report includes SHA-256 digests of both inputs.
+A session is exact only if every SKU count matches. SKU weighted absolute error
+is the sum of undercounted and overcounted units divided by expected units across
+sessions. SKU false-positive rate is the share of sessions where that SKU was
+absent but the app proposed at least one unit. Undefined rates fail their checks.
+
+The report covers count proposals. Record operator corrections, time savings, export
+success and device behavior separately using the agreed pilot protocol.
