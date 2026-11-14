@@ -236,13 +236,13 @@ jobs:
 
     steps:
       - name: Download demo package artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: athmar-demo-customer-package
           path: Build/DemoCustomerPackage
 
       - name: Download food package artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: athmar-food-customer-package
           path: Build/AthmarCustomerPackage
@@ -313,13 +313,13 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Download demo package artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: athmar-demo-customer-package
           path: Build/DemoCustomerPackage
 
       - name: Download food package artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: athmar-food-customer-package
           path: Build/AthmarCustomerPackage
