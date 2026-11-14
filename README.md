@@ -99,7 +99,7 @@ The implemented provisioning path uses a trusted manifest URL and manually suppl
 
 ## Commercial deployment
 
-Use a narrow paid pilot covering an approved SKU set, device baseline and environment. Define acceptance thresholds before testing and calculate results only from manually verified held-out sessions. A successful CI build or successful package installation is not evidence of counting accuracy.
+Use a narrow paid pilot covering an approved SKU set, device baseline and environment. Define acceptance thresholds before testing and calculate results only from manually verified held-out sessions. Use the [held-out scoring tool](docs/COMMERCIAL_PILOT.md#scoring-held-out-count-proposals) to measure count error per SKU, false positives for absent products and exact counts per session.
 
 ## Documentation
 

@@ -112,6 +112,9 @@ jobs:
           print("Repository guardrails passed.")
           PY
 
+      - name: Test pilot acceptance scorer
+        run: python -m unittest discover -s tools/pilot_acceptance -v
+
   unity-editmode-tests:
     name: Unity EditMode tests
     needs: repository-guardrails

@@ -63,6 +63,9 @@ sysinfo.txt
 /tools/auto_label/.cache/
 /tools/auto_label/output/
 
+# Python bytecode
+__pycache__/
+
 # OS files
 .DS_Store
 Thumbs.db
